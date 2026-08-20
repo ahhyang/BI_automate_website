@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: siteform
+      POSTGRES_PASSWORD: siteform
+      POSTGRES_DB: siteform
+    ports:
+      - "5432:5432"
+    volumes:
+      - siteform_pg:/var/lib/postgresql/data
+
+volumes:
+  siteform_pg:

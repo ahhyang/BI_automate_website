@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f7f3ec;
+  --ink: #1a1714;
+  --ink-soft: #5c5348;
+  --line: #e4d9c8;
+  --accent: #c45c26;
+  --accent-dark: #9a3f12;
+  --ok: #2f6d4f;
+  --warn: #a16207;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-newsreader);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+::selection {
+  background: #f0c9ae;
+}
+
+.site-root {
+  min-height: 100vh;
+}
+
+.sf-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid color-mix(in srgb, var(--sf-ink) 12%, transparent);
+}
+
+.sf-nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sf-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.sf-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 999px;
+  background: white;
+}
+
+.sf-nav nav {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.9rem;
+}
+
+.sf-hero,
+.sf-section,
+.sf-footer {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem;
+}
+
+.template-bold .sf-hero,
+.template-bold .sf-section,
+.template-bold .sf-footer {
+  padding-top: 5.5rem;
+}
+
+.sf-hero h1,
+.sf-section h2,
+.sf-cta h2 {
+  font-family: var(--sf-display), Georgia, serif;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+
+.sf-hero h1 {
+  font-size: clamp(2.6rem, 6vw, 5.2rem);
+  max-width: 16ch;
+}
+
+.sf-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  margin-bottom: 1rem;
+  opacity: 0.7;
+}
+
+.sf-lede,
+.sf-body {
+  font-size: 1.15rem;
+  line-height: 1.65;
+  max-width: 42rem;
+  margin-top: 1.25rem;
+  opacity: 0.88;
+}
+
+.sf-btn {
+  display: inline-flex;
+  margin-top: 2rem;
+  padding: 0.85rem 1.3rem;
+  border-radius: 999px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.sf-btn-invert {
+  background: color-mix(in srgb, white 92%, transparent);
+  color: #1a1714;
+}
+
+.sf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.sf-card,
+.sf-quotes blockquote {
+  border: 1px solid color-mix(in srgb, var(--sf-ink) 12%, transparent);
+  padding: 1.4rem;
+  border-radius: 1.25rem;
+}
+
+.sf-card h3 {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.layout-split .sf-hero {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 2rem;
+  align-items: end;
+}
+
+.layout-asymmetric .sf-hero h1 {
+  margin-left: 8vw;
+}
+
+.sf-cta {
+  margin: 2rem auto;
+  max-width: 1080px;
+  padding: 3.5rem 1.75rem;
+  border-radius: 1.75rem;
+}
+
+.sf-contact {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.4rem;
+  font-size: 1.05rem;
+}
+
+.sf-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  opacity: 0.7;
+  font-size: 0.9rem;
+  border-top: 1px solid color-mix(in srgb, var(--sf-ink) 12%, transparent);
+}
+
+.powered-by {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  background: #1a1714;
+  color: #f7f3ec;
+  font-size: 0.75rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+}
+
+@media (max-width: 800px) {
+  .layout-split .sf-hero,
+  .sf-footer {
+    display: block;
+  }
+  .sf-nav nav {
+    display: none;
+  }
+}
