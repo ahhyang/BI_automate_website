@@ -2,17 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import type { TemplateId } from "@/types/content";
+import type { LinksInput, MediaItem, TemplateId } from "@/types/content";
 import { Button } from "@/components/ui/Button";
-import { ErrorNote } from "@/components/ui/Field";
+import { ErrorNote, Field, inputClass } from "@/components/ui/Field";
 import { UpgradePrompt } from "./UpgradePrompt";
 
-type Progress =
-  | "idle"
-  | "reading"
-  | "extracting"
-  | "generating"
-  | "done";
+type Progress = "idle" | "reading" | "extracting" | "generating" | "done";
 
 const GEN_STEPS = [
   { key: "copy", label: "Writing homepage copy" },
@@ -22,10 +17,26 @@ const GEN_STEPS = [
   { key: "ready", label: "Preview ready" },
 ];
 
+const EMPTY_LINKS: LinksInput = {
+  email: "",
+  phone: "",
+  whatsapp: "",
+  website: "",
+  linkedin: "",
+  twitter: "",
+  facebook: "",
+  instagram: "",
+  youtube: "",
+  tiktok: "",
+  telegram: "",
+};
+
 export function UploadFlow() {
   const router = useRouter();
   const [logo, setLogo] = useState<File | null>(null);
-  const [doc, setDoc] = useState<File | null>(null);
+  const [docs, setDocs] = useState<File[]>([]);
+  const [media, setMedia] = useState<File[]>([]);
+  const [links, setLinks] = useState<LinksInput>(EMPTY_LINKS);
   const [pasted, setPasted] = useState("");
   const [questions, setQuestions] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -51,15 +62,37 @@ export function UploadFlow() {
     };
   }, [logoUrl]);
 
+  const hasLinks = Object.values(links).some((v) => v.trim());
   const canStart =
     progress === "idle" &&
-    (Boolean(doc) || Boolean(pasted.trim()) || (questions && q.companyName && q.oneLiner));
+    (docs.length > 0 ||
+      media.length > 0 ||
+      Boolean(pasted.trim()) ||
+      hasLinks ||
+      (questions && q.companyName && q.oneLiner));
 
-  async function runPipeline(opts?: { docFile?: File | null; logoFile?: File | null }) {
-    const nextDoc = opts?.docFile !== undefined ? opts.docFile : doc;
-    const nextLogo = opts?.logoFile !== undefined ? opts.logoFile : logo;
-    if (!nextDoc && !pasted.trim() && !questions) {
-      setError("Drop a PDF (or paste text / answer the questions) to generate your site.");
+  function addDocs(files: FileList | File[] | null) {
+    if (!files) return;
+    const next = Array.from(files);
+    setDocs((prev) => [...prev, ...next].slice(0, 12));
+  }
+
+  function addMedia(files: FileList | File[] | null) {
+    if (!files) return;
+    const next = Array.from(files);
+    setMedia((prev) => [...prev, ...next].slice(0, 24));
+  }
+
+  async function runPipeline(opts?: { extraDocs?: File[] }) {
+    const nextDocs = opts?.extraDocs ? [...docs, ...opts.extraDocs] : docs;
+    if (
+      !nextDocs.length &&
+      !media.length &&
+      !pasted.trim() &&
+      !hasLinks &&
+      !(questions && q.companyName)
+    ) {
+      setError("Drop a PDF, photos, videos, or add your WhatsApp / social links to continue.");
       return;
     }
 
@@ -68,15 +101,19 @@ export function UploadFlow() {
     setGenSteps(GEN_STEPS.map((s) => ({ ...s, status: "pending" })));
 
     const form = new FormData();
-    if (nextLogo) form.set("logo", nextLogo);
-    if (nextDoc) form.set("doc", nextDoc);
+    if (logo) form.set("logo", logo);
+    for (const doc of nextDocs) form.append("doc", doc);
+    for (const file of media) form.append("media", file);
     if (pasted) form.set("pasted", pasted);
+    form.set("links", JSON.stringify(links));
 
     const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
     const uploadJson = (await uploadRes.json()) as {
       siteId?: string;
       parsedText?: string;
       brandColor?: string;
+      media?: MediaItem[];
+      links?: LinksInput;
       error?: string;
       reason?: string;
     };
@@ -86,7 +123,7 @@ export function UploadFlow() {
         setUpgrade("site_limit");
         return;
       }
-      setError(uploadJson.error || "Upload didn't work. Try a smaller file or paste the text.");
+      setError(uploadJson.error || "Upload didn't work. Try smaller files or paste the text.");
       return;
     }
 
@@ -96,11 +133,19 @@ export function UploadFlow() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
         questions
-          ? { siteId: uploadJson.siteId, brandColor: uploadJson.brandColor, questions: q }
+          ? {
+              siteId: uploadJson.siteId,
+              brandColor: uploadJson.brandColor,
+              questions: q,
+              links: uploadJson.links || links,
+              media: uploadJson.media || [],
+            }
           : {
               siteId: uploadJson.siteId,
               text: uploadJson.parsedText || pasted,
               brandColor: uploadJson.brandColor,
+              links: uploadJson.links || links,
+              media: uploadJson.media || [],
             },
       ),
     });
@@ -169,74 +214,134 @@ export function UploadFlow() {
     }
   }
 
-  function onDocDropped(file: File) {
-    setDoc(file);
-    setQuestions(false);
-    void runPipeline({ docFile: file });
-  }
-
   return (
     <div className="mx-auto max-w-3xl px-5 py-10">
       <p className="text-xs uppercase tracking-[0.2em] text-accent">Create a site</p>
-      <h1 className="mt-3 font-display text-5xl">Drop a PDF. Get a website.</h1>
+      <h1 className="mt-3 font-display text-5xl">Drop everything you have.</h1>
       <p className="mt-3 max-w-2xl text-ink-soft">
-        We read the document, write the pages, and open a drag-and-drop editor so you can rearrange
-        and rewrite anything.
+        PDFs, photos, videos, WhatsApp, Gmail, Instagram — add what you already use. We build the
+        site, then you drag and edit.
       </p>
 
       <DropZone
         className="mt-8"
         accept=".pdf,.docx,.txt,application/pdf,text/plain"
-        label={doc ? doc.name : "Drop your company PDF here"}
-        hint="PDF, Word, or TXT · generation starts automatically"
-        file={doc}
+        label={docs.length ? `${docs.length} document${docs.length > 1 ? "s" : ""} ready` : "Drop PDFs / Word docs"}
+        hint="Company profile, brochure, menu — multiple files OK"
+        multiple
         large
         disabled={progress !== "idle"}
-        onFile={(file) => {
-          if (!file) {
-            setDoc(null);
-            return;
-          }
-          onDocDropped(file);
+        onFiles={(files) => {
+          addDocs(files);
+          if (files?.length) void runPipeline({ extraDocs: Array.from(files) });
         }}
       />
+      {docs.length ? (
+        <ul className="mt-2 space-y-1 text-sm text-ink-soft">
+          {docs.map((f) => (
+            <li key={`${f.name}-${f.size}`}>• {f.name}</li>
+          ))}
+        </ul>
+      ) : null}
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
         <DropZone
-          accept="image/png,image/jpeg,image/svg+xml"
-          label={logo ? logo.name : "Optional logo"}
-          hint="PNG, JPG, or SVG"
-          file={logo}
+          accept="image/*,video/*,.mp4,.webm,.mov,.png,.jpg,.jpeg,.webp,.gif"
+          label={media.length ? `${media.length} media file${media.length > 1 ? "s" : ""}` : "Photos & videos"}
+          hint="Drag many at once · max 40MB each"
+          multiple
           disabled={progress !== "idle"}
-          onFile={setLogo}
+          onFiles={addMedia}
+        />
+        <DropZone
+          accept="image/png,image/jpeg,image/svg+xml,image/webp"
+          label={logo ? logo.name : "Logo (optional)"}
+          hint="PNG, JPG, or SVG"
+          disabled={progress !== "idle"}
+          onFiles={(files) => setLogo(files?.[0] || null)}
         >
           {logoUrl ? (
-            <div className="mt-3 flex items-center gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoUrl} alt="" className="h-12 w-12 rounded-full border border-line bg-white object-contain p-1" />
-              <p className="text-xs text-ink-soft">Used in the navbar and favicon</p>
-            </div>
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl}
+              alt=""
+              className="mt-3 h-12 w-12 rounded-full border border-line bg-white object-contain p-1"
+            />
           ) : null}
         </DropZone>
-        <Button
-          className="sm:mb-1"
-          onClick={() => void runPipeline()}
-          disabled={!canStart}
-        >
+      </div>
+      {media.length ? (
+        <ul className="mt-2 max-h-28 space-y-1 overflow-auto text-sm text-ink-soft">
+          {media.map((f) => (
+            <li key={`${f.name}-${f.size}`}>
+              • {f.name}{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setMedia((prev) => prev.filter((x) => x !== f))}
+              >
+                remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-6 rounded-3xl border border-line bg-white p-5">
+        <h2 className="font-display text-2xl">Your links</h2>
+        <p className="mt-1 text-sm text-ink-soft">
+          WhatsApp, Gmail, Instagram, Facebook — paste handles or full URLs.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ["email", "Gmail / email"],
+              ["whatsapp", "WhatsApp (number or wa.me)"],
+              ["phone", "Phone"],
+              ["website", "Website"],
+              ["instagram", "Instagram"],
+              ["facebook", "Facebook"],
+              ["linkedin", "LinkedIn"],
+              ["twitter", "X / Twitter"],
+              ["youtube", "YouTube"],
+              ["tiktok", "TikTok"],
+              ["telegram", "Telegram"],
+            ] as const
+          ).map(([key, label]) => (
+            <Field key={key} label={label}>
+              <input
+                className={inputClass}
+                value={links[key]}
+                disabled={progress !== "idle"}
+                placeholder={key === "whatsapp" ? "+60123456789" : ""}
+                onChange={(e) => setLinks({ ...links, [key]: e.target.value })}
+              />
+            </Field>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <Button onClick={() => void runPipeline()} disabled={!canStart}>
           {progress === "idle" ? "Generate site" : "Working…"}
         </Button>
+        <button
+          type="button"
+          className="text-sm underline"
+          onClick={() => setAdvanced((v) => !v)}
+        >
+          {advanced ? "Hide other options" : "Paste text or pick a template"}
+        </button>
       </div>
 
       {progress !== "idle" ? (
         <ol className="mt-8 space-y-2 rounded-3xl border border-line bg-white p-5 text-sm">
           <li className="flex gap-2">
             <span>{progress === "reading" ? "●" : "✓"}</span>
-            Reading your document…
+            Uploading files & links…
           </li>
           <li className="flex gap-2">
-            <span>
-              {progress === "extracting" ? "●" : progress === "reading" ? "○" : "✓"}
-            </span>
+            <span>{progress === "extracting" ? "●" : progress === "reading" ? "○" : "✓"}</span>
             Extracting company details…
           </li>
           {genSteps.map((step) => (
@@ -256,14 +361,6 @@ export function UploadFlow() {
         </ol>
       ) : null}
 
-      <button
-        type="button"
-        className="mt-6 text-sm underline"
-        onClick={() => setAdvanced((v) => !v)}
-      >
-        {advanced ? "Hide other options" : "Paste text, questions, or pick a template"}
-      </button>
-
       {advanced ? (
         <div className="mt-4 space-y-4 rounded-3xl border border-line bg-white p-5">
           <label className="block text-sm">
@@ -272,11 +369,9 @@ export function UploadFlow() {
               className="mt-1.5 min-h-28 w-full rounded-2xl border border-line bg-paper p-3 text-sm"
               value={pasted}
               onChange={(e) => setPasted(e.target.value)}
-              placeholder="About us, services, contact…"
               disabled={progress !== "idle"}
             />
           </label>
-
           <label className="block text-sm">
             Starting template
             <select
@@ -291,15 +386,9 @@ export function UploadFlow() {
               <option value="editorial">Editorial</option>
             </select>
           </label>
-
-          <button
-            type="button"
-            className="text-sm underline"
-            onClick={() => setQuestions((v) => !v)}
-          >
+          <button type="button" className="text-sm underline" onClick={() => setQuestions((v) => !v)}>
             {questions ? "Hide questions" : "Or answer 5 quick questions instead"}
           </button>
-
           {questions ? (
             <div className="grid gap-3">
               {(
@@ -328,13 +417,9 @@ export function UploadFlow() {
 
       {error ? (
         <div className="mt-4">
-          <ErrorNote
-            message={error}
-            action="You can paste the text, switch to the five questions, or try again."
-          />
+          <ErrorNote message={error} action="You can add links only, paste text, or try smaller files." />
         </div>
       ) : null}
-
       {upgrade ? <UpgradePrompt reason={upgrade} onClose={() => setUpgrade(null)} /> : null}
     </div>
   );
@@ -344,35 +429,30 @@ function DropZone({
   label,
   hint,
   accept,
-  file,
-  onFile,
+  onFiles,
   children,
   large,
   className = "",
   disabled,
+  multiple,
 }: {
   label: string;
   hint: string;
   accept: string;
-  file: File | null;
-  onFile: (file: File | null) => void;
+  onFiles: (files: FileList | null) => void;
   children?: React.ReactNode;
   large?: boolean;
   className?: string;
   disabled?: boolean;
+  multiple?: boolean;
 }) {
   const [over, setOver] = useState(false);
-
-  function takeFiles(list: FileList | null) {
-    const next = list?.[0] || null;
-    onFile(next);
-  }
 
   return (
     <label
       className={`block cursor-pointer rounded-3xl border border-dashed transition ${
         over ? "border-accent bg-accent/5" : "border-line bg-white"
-      } ${large ? "px-6 py-14 text-center" : "p-5"} ${disabled ? "pointer-events-none opacity-60" : ""} ${className}`}
+      } ${large ? "px-6 py-12 text-center" : "p-5"} ${disabled ? "pointer-events-none opacity-60" : ""} ${className}`}
       onDragEnter={(e) => {
         e.preventDefault();
         setOver(true);
@@ -388,26 +468,24 @@ function DropZone({
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        takeFiles(e.dataTransfer.files);
+        onFiles(e.dataTransfer.files);
       }}
     >
-      <span className={`block font-medium ${large ? "font-display text-2xl" : "text-sm"}`}>
-        {label}
-      </span>
+      <span className={`block font-medium ${large ? "font-display text-2xl" : "text-sm"}`}>{label}</span>
       <span className={`mt-1 block text-ink-soft ${large ? "text-sm" : "text-xs"}`}>{hint}</span>
       <input
         type="file"
         accept={accept}
+        multiple={multiple}
         className="sr-only"
         disabled={disabled}
-        onChange={(e) => takeFiles(e.target.files)}
+        onChange={(e) => onFiles(e.target.files)}
       />
-      {!file && !large ? (
-        <p className="mt-2 text-sm text-ink-soft">Drop a file or click to browse</p>
-      ) : null}
-      {large && !file ? (
+      {large ? (
         <p className="mt-4 text-xs uppercase tracking-[0.18em] text-ink-soft">or click to browse</p>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-sm text-ink-soft">Drop files or click</p>
+      )}
       {children}
     </label>
   );

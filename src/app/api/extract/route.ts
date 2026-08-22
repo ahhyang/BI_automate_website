@@ -4,7 +4,14 @@ import { ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { extractCompanyData, extractFromQuestions } from "@/lib/llm/pipeline";
-import { fiveQuestionsSchema } from "@/types/content";
+import {
+  companyDataSchema,
+  fiveQuestionsSchema,
+  linksInputSchema,
+  type CompanyData,
+  type LinksInput,
+  type MediaItem,
+} from "@/types/content";
 import { uniqueSubdomain } from "@/lib/sites";
 import { slugify } from "@/lib/slug";
 
@@ -15,6 +22,35 @@ async function ownedSite(siteId: string, tenantId: string) {
   return site;
 }
 
+function mergeLinksAndMedia(
+  company: CompanyData,
+  links: LinksInput,
+  media: MediaItem[],
+): CompanyData {
+  return companyDataSchema.parse({
+    ...company,
+    contact: {
+      ...company.contact,
+      email: links.email || company.contact.email,
+      phone: links.phone || company.contact.phone,
+      website: links.website || company.contact.website,
+      whatsapp: links.whatsapp || company.contact.whatsapp,
+    },
+    social: {
+      ...company.social,
+      linkedin: links.linkedin || company.social.linkedin,
+      twitter: links.twitter || company.social.twitter,
+      facebook: links.facebook || company.social.facebook,
+      instagram: links.instagram || company.social.instagram,
+      youtube: links.youtube || company.social.youtube,
+      tiktok: links.tiktok || company.social.tiktok,
+      telegram: links.telegram || company.social.telegram,
+      whatsapp: links.whatsapp || company.social.whatsapp,
+    },
+    media: media.length ? media : company.media,
+  });
+}
+
 export async function POST(request: Request) {
   const session = await ensureGuestSession();
   const body = (await request.json()) as {
@@ -22,6 +58,8 @@ export async function POST(request: Request) {
     text?: string;
     brandColor?: string;
     questions?: unknown;
+    links?: unknown;
+    media?: MediaItem[];
   };
   if (!body.siteId) {
     return NextResponse.json({ error: "Missing site." }, { status: 400 });
@@ -32,7 +70,10 @@ export async function POST(request: Request) {
   }
 
   const brandColor = body.brandColor || "#1A1714";
-  let company;
+  const links = linksInputSchema.parse(body.links ?? {});
+  const media = Array.isArray(body.media) ? body.media : [];
+
+  let company: CompanyData;
   try {
     if (body.questions) {
       const parsed = fiveQuestionsSchema.safeParse(body.questions);
@@ -45,10 +86,49 @@ export async function POST(request: Request) {
       company = extractFromQuestions(parsed.data, brandColor);
     } else if (body.text?.trim()) {
       company = await extractCompanyData({ text: body.text, brandColor });
+    } else if (
+      media.length ||
+      links.email ||
+      links.whatsapp ||
+      links.instagram ||
+      links.facebook ||
+      links.website
+    ) {
+      company = companyDataSchema.parse({
+        name: links.website?.replace(/^https?:\/\//, "").split("/")[0] || "Your company",
+        tagline: "Welcome — explore our work and get in touch.",
+        industry: "",
+        description: "Browse our gallery and reach us through the links below.",
+        services: [],
+        products: [],
+        contact: {
+          email: links.email || "",
+          phone: links.phone || "",
+          address: "",
+          website: links.website || "",
+          whatsapp: links.whatsapp || "",
+        },
+        social: {
+          linkedin: links.linkedin || "",
+          twitter: links.twitter || "",
+          facebook: links.facebook || "",
+          instagram: links.instagram || "",
+          youtube: links.youtube || "",
+          tiktok: links.tiktok || "",
+          telegram: links.telegram || "",
+          whatsapp: links.whatsapp || "",
+        },
+        media,
+        brandColor,
+        palette: [brandColor],
+        tone: "friendly",
+        uncertainFields: ["name", "description"],
+      });
     } else {
       return NextResponse.json(
         {
-          error: "We need a document, pasted text, or the five quick questions before we can continue.",
+          error:
+            "Add a PDF, photos/videos, paste text, links, or answer the five questions so we have something to build from.",
         },
         { status: 400 },
       );
@@ -61,6 +141,8 @@ export async function POST(request: Request) {
       { status: 422 },
     );
   }
+
+  company = mergeLinksAndMedia(company, links, media);
 
   const db = getDb();
   const subdomain = await uniqueSubdomain(slugify(company.name) || site.subdomain);

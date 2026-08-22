@@ -81,8 +81,18 @@ export function heuristicExtract(text: string, brandColor: string): CompanyData 
     description: text.slice(0, 600),
     services: serviceMatches.length ? serviceMatches : [{ title: "Consulting", description: "" }],
     products: [],
-    contact: { email, phone, address: "", website: "" },
-    social: { linkedin: "", twitter: "", facebook: "", instagram: "" },
+    contact: { email, phone, address: "", website: "", whatsapp: "" },
+    social: {
+      linkedin: "",
+      twitter: "",
+      facebook: "",
+      instagram: "",
+      youtube: "",
+      tiktok: "",
+      telegram: "",
+      whatsapp: "",
+    },
+    media: [],
     brandColor,
     palette: [brandColor],
     tone: "friendly",
@@ -112,8 +122,19 @@ export function extractFromQuestions(answers: FiveQuestions, brandColor: string)
       phone,
       address: email || phone ? "" : answers.contact,
       website: "",
+      whatsapp: "",
     },
-    social: { linkedin: "", twitter: "", facebook: "", instagram: "" },
+    social: {
+      linkedin: "",
+      twitter: "",
+      facebook: "",
+      instagram: "",
+      youtube: "",
+      tiktok: "",
+      telegram: "",
+      whatsapp: "",
+    },
+    media: [],
     brandColor,
     palette: [brandColor],
     tone: "friendly",
@@ -135,8 +156,8 @@ export async function extractCompanyData(input: {
   "description": string (1-3 sentences),
   "services": [{"title": string, "description": string}],
   "products": [{"title": string, "description": string}],
-  "contact": {"email": string, "phone": string, "address": string, "website": string},
-  "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string},
+  "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string},
+  "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string, "youtube": string, "tiktok": string, "telegram": string, "whatsapp": string},
   "tone": "formal" | "friendly" | "technical",
   "uncertainFields": string[] (dot-paths for anything you guessed or could not find)
 }
@@ -195,6 +216,11 @@ function templateCopy(company: CompanyData): SiteContentMap {
       email: company.contact.email,
       phone: company.contact.phone,
       address: company.contact.address,
+      whatsapp: company.contact.whatsapp,
+    },
+    gallery: {
+      title: company.media.some((m) => m.kind === "video") ? "Photos & videos" : "Gallery",
+      body: company.media.length ? "A look at our work and materials." : "",
     },
     footer: {
       blurb: offerings[0]
@@ -218,6 +244,7 @@ export async function generateSiteContent(input: {
   const sectionOrder: SectionKey[] = [...SECTION_KEYS].filter((key) => {
     if (key === "services" && input.company.services.length === 0) return false;
     if (key === "products" && input.company.products.length === 0) return false;
+    if (key === "gallery" && input.company.media.length === 0) return false;
     return true;
   });
 
@@ -235,19 +262,20 @@ export async function generateSiteContent(input: {
 {
   "layoutVariant": "standard" | "split" | "stacked" | "asymmetric",
   "palette": string[] (4-5 hex colors, accessible, based on brandColor),
-  "sectionOrder": string[] (subset of hero, about, services, products, testimonials, cta, contact, footer — hero first, footer last),
+  "sectionOrder": string[] (subset of hero, about, services, products, gallery, testimonials, cta, contact, footer — hero first, footer last),
   "content": {
     "hero": {"headline": string, "subheadline": string, "ctaLabel": string, "ctaHref": "#contact"},
     "about": {"title": string, "body": string},
     "services": {"title": string, "items": [{"title": string, "description": string}]},
     "products": {"title": string, "items": [{"title": string, "description": string}]},
+    "gallery": {"title": string, "body": string},
     "testimonials": {"title": string, "items": [{"quote": string, "author": string, "role": string}]},
     "cta": {"headline": string, "body": string, "buttonLabel": string},
-    "contact": {"title": string, "body": string, "email": string, "phone": string, "address": string},
+    "contact": {"title": string, "body": string, "email": string, "phone": string, "address": string, "whatsapp": string},
     "footer": {"blurb": string}
   }
 }
-Rules: do not invent contact details. Keep contrast-friendly hex colors. Max 8 sections. Tone must match the company tone. Template hint: ${input.templateId}.`,
+Rules: do not invent contact details. Include gallery only if the company has media. Keep contrast-friendly hex colors. Max 9 sections. Tone must match the company tone. Template hint: ${input.templateId}.`,
     JSON.stringify(input.company),
   );
 

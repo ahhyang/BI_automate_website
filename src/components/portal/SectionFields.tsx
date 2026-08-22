@@ -105,6 +105,19 @@ export function SectionFields({
     );
   }
 
+  if (sectionKey === "gallery") {
+    const data = (value as SiteContentMap["gallery"]) || { title: "Gallery", body: "" };
+    return (
+      <div className="space-y-3">
+        <TextField label="Title" value={data.title} onChange={(title) => onChange({ ...data, title })} />
+        <TextAreaField label="Intro" value={data.body} onChange={(body) => onChange({ ...data, body })} />
+        <p className="text-xs text-ink-soft">
+          Photos, videos, and PDFs come from your uploads. Re-upload from Create to add more files.
+        </p>
+      </div>
+    );
+  }
+
   if (sectionKey === "testimonials") {
     const data = (value as SiteContentMap["testimonials"]) || { title: "What clients say", items: [] };
     return (
@@ -200,13 +213,19 @@ export function SectionFields({
       email: "",
       phone: "",
       address: "",
+      whatsapp: "",
     };
     return (
       <div className="space-y-3">
         <TextField label="Title" value={data.title} onChange={(title) => onChange({ ...data, title })} />
         <TextAreaField label="Body" value={data.body} onChange={(body) => onChange({ ...data, body })} />
-        <TextField label="Email" value={data.email} onChange={(email) => onChange({ ...data, email })} />
+        <TextField label="Email / Gmail" value={data.email} onChange={(email) => onChange({ ...data, email })} />
         <TextField label="Phone" value={data.phone} onChange={(phone) => onChange({ ...data, phone })} />
+        <TextField
+          label="WhatsApp"
+          value={data.whatsapp}
+          onChange={(whatsapp) => onChange({ ...data, whatsapp })}
+        />
         <TextAreaField label="Address" value={data.address} onChange={(address) => onChange({ ...data, address })} />
       </div>
     );

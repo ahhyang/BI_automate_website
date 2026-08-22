@@ -8,6 +8,30 @@ export const offeringSchema = z.object({
   description: z.string().default(""),
 });
 
+export const mediaItemSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["photo", "video", "pdf"]),
+  url: z.string(),
+  filename: z.string().default(""),
+  caption: z.string().default(""),
+  mimeType: z.string().default(""),
+});
+
+export type MediaItem = z.infer<typeof mediaItemSchema>;
+
+export const socialLinksSchema = z.object({
+  linkedin: z.string().default(""),
+  twitter: z.string().default(""),
+  facebook: z.string().default(""),
+  instagram: z.string().default(""),
+  youtube: z.string().default(""),
+  tiktok: z.string().default(""),
+  telegram: z.string().default(""),
+  whatsapp: z.string().default(""),
+});
+
+export type SocialLinks = z.infer<typeof socialLinksSchema>;
+
 export const companyDataSchema = z.object({
   name: z.string().min(1),
   tagline: z.string().default(""),
@@ -20,13 +44,19 @@ export const companyDataSchema = z.object({
     phone: z.string().default(""),
     address: z.string().default(""),
     website: z.string().default(""),
+    whatsapp: z.string().default(""),
   }),
-  social: z.object({
-    linkedin: z.string().default(""),
-    twitter: z.string().default(""),
-    facebook: z.string().default(""),
-    instagram: z.string().default(""),
+  social: socialLinksSchema.default({
+    linkedin: "",
+    twitter: "",
+    facebook: "",
+    instagram: "",
+    youtube: "",
+    tiktok: "",
+    telegram: "",
+    whatsapp: "",
   }),
+  media: z.array(mediaItemSchema).default([]),
   brandColor: z.string().default("#1A1714"),
   palette: z.array(z.string()).default([]),
   tone: toneSchema.default("friendly"),
@@ -40,6 +70,7 @@ export const SECTION_KEYS = [
   "about",
   "services",
   "products",
+  "gallery",
   "testimonials",
   "cta",
   "contact",
@@ -63,6 +94,11 @@ export const aboutContentSchema = z.object({
 export const listSectionSchema = z.object({
   title: z.string(),
   items: z.array(offeringSchema).default([]),
+});
+
+export const galleryContentSchema = z.object({
+  title: z.string().default("Gallery"),
+  body: z.string().default(""),
 });
 
 export const testimonialsContentSchema = z.object({
@@ -90,6 +126,7 @@ export const contactContentSchema = z.object({
   email: z.string().default(""),
   phone: z.string().default(""),
   address: z.string().default(""),
+  whatsapp: z.string().default(""),
 });
 
 export const footerContentSchema = z.object({
@@ -101,6 +138,7 @@ export const sectionSchemas = {
   about: aboutContentSchema,
   services: listSectionSchema,
   products: listSectionSchema,
+  gallery: galleryContentSchema,
   testimonials: testimonialsContentSchema,
   cta: ctaContentSchema,
   contact: contactContentSchema,
@@ -112,6 +150,7 @@ export type SiteContentMap = {
   about: z.infer<typeof aboutContentSchema>;
   services: z.infer<typeof listSectionSchema>;
   products: z.infer<typeof listSectionSchema>;
+  gallery: z.infer<typeof galleryContentSchema>;
   testimonials: z.infer<typeof testimonialsContentSchema>;
   cta: z.infer<typeof ctaContentSchema>;
   contact: z.infer<typeof contactContentSchema>;
@@ -147,3 +186,57 @@ export const fiveQuestionsSchema = z.object({
 });
 
 export type FiveQuestions = z.infer<typeof fiveQuestionsSchema>;
+
+export const linksInputSchema = z.object({
+  email: z.string().optional().default(""),
+  phone: z.string().optional().default(""),
+  whatsapp: z.string().optional().default(""),
+  website: z.string().optional().default(""),
+  linkedin: z.string().optional().default(""),
+  twitter: z.string().optional().default(""),
+  facebook: z.string().optional().default(""),
+  instagram: z.string().optional().default(""),
+  youtube: z.string().optional().default(""),
+  tiktok: z.string().optional().default(""),
+  telegram: z.string().optional().default(""),
+});
+
+export type LinksInput = z.infer<typeof linksInputSchema>;
+
+/** Build a clickable URL from a handle, phone, or full URL. */
+export function toLinkHref(
+  kind: "email" | "phone" | "whatsapp" | "website" | keyof SocialLinks,
+  value: string,
+) {
+  const raw = value.trim();
+  if (!raw) return "";
+  if (kind === "email") return raw.includes("mailto:") ? raw : `mailto:${raw}`;
+  if (kind === "phone") return raw.startsWith("tel:") ? raw : `tel:${raw.replace(/[^\d+]/g, "")}`;
+  if (kind === "whatsapp") {
+    if (raw.includes("wa.me") || raw.includes("whatsapp.com")) return raw.startsWith("http") ? raw : `https://${raw}`;
+    const digits = raw.replace(/[^\d]/g, "");
+    return digits ? `https://wa.me/${digits}` : "";
+  }
+  if (kind === "website") return raw.startsWith("http") ? raw : `https://${raw}`;
+  if (raw.startsWith("http")) return raw;
+  if (kind === "instagram") return `https://instagram.com/${raw.replace(/^@/, "")}`;
+  if (kind === "twitter") return `https://x.com/${raw.replace(/^@/, "")}`;
+  if (kind === "facebook") return `https://facebook.com/${raw.replace(/^@/, "")}`;
+  if (kind === "linkedin") {
+    return raw.includes("linkedin.com")
+      ? raw.startsWith("http")
+        ? raw
+        : `https://${raw}`
+      : `https://linkedin.com/in/${raw.replace(/^@/, "")}`;
+  }
+  if (kind === "youtube") {
+    return raw.includes("youtube.com") || raw.includes("youtu.be")
+      ? raw.startsWith("http")
+        ? raw
+        : `https://${raw}`
+      : `https://youtube.com/@${raw.replace(/^@/, "")}`;
+  }
+  if (kind === "tiktok") return `https://tiktok.com/@${raw.replace(/^@/, "")}`;
+  if (kind === "telegram") return `https://t.me/${raw.replace(/^@/, "")}`;
+  return raw.startsWith("http") ? raw : `https://${raw}`;
+}

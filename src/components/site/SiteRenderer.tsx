@@ -5,6 +5,7 @@ import type {
   SiteRenderModel,
   SectionKey,
 } from "@/types/content";
+import { toLinkHref } from "@/types/content";
 import { contrastText, ensureContrast } from "@/lib/color-utils";
 
 const FONT: Record<SiteRenderModel["templateId"], { display: string; body: string }> = {
@@ -125,6 +126,7 @@ function Nav({ model }: { model: SiteRenderModel }) {
           <span>{model.name}</span>
         </a>
         <nav>
+          {model.sectionOrder.includes("gallery") ? <a href="#gallery">Gallery</a> : null}
           {model.sectionOrder.includes("services") ? <a href="#services">Services</a> : null}
           {model.sectionOrder.includes("about") ? <a href="#about">About</a> : null}
           <a href="#contact">Contact</a>
@@ -217,22 +219,94 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
     );
   }
 
+  if (sectionKey === "gallery") {
+    const data = content.gallery;
+    const items = model.company.media || [];
+    if (!data || !items.length) return null;
+    return (
+      <section className="sf-section" id="gallery">
+        <h2>{data.title}</h2>
+        {data.body ? <p className="sf-body">{data.body}</p> : null}
+        <div className="sf-gallery">
+          {items.map((item) => (
+            <figure key={item.id} className="sf-gallery-item">
+              {item.kind === "photo" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.url} alt={item.caption || item.filename || "Photo"} />
+              ) : null}
+              {item.kind === "video" ? (
+                <video src={item.url} controls playsInline preload="metadata" />
+              ) : null}
+              {item.kind === "pdf" ? (
+                <a className="sf-doc-card" href={item.url} target="_blank" rel="noreferrer">
+                  <span className="sf-doc-icon">PDF</span>
+                  <span>{item.caption || item.filename || "Document"}</span>
+                </a>
+              ) : null}
+              {item.caption && item.kind !== "pdf" ? <figcaption>{item.caption}</figcaption> : null}
+            </figure>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   if (sectionKey === "contact") {
     const data = content.contact;
     if (!data) return null;
+    const company = model.company;
+    const email = data.email || company.contact.email;
+    const phone = data.phone || company.contact.phone;
+    const address = data.address || company.contact.address;
+    const whatsapp = data.whatsapp || company.contact.whatsapp || company.social.whatsapp;
+    const website = company.contact.website;
+    const socialEntries = (
+      [
+        ["WhatsApp", whatsapp, "whatsapp"],
+        ["Email", email, "email"],
+        ["Website", website, "website"],
+        ["Instagram", company.social.instagram, "instagram"],
+        ["Facebook", company.social.facebook, "facebook"],
+        ["LinkedIn", company.social.linkedin, "linkedin"],
+        ["X / Twitter", company.social.twitter, "twitter"],
+        ["YouTube", company.social.youtube, "youtube"],
+        ["TikTok", company.social.tiktok, "tiktok"],
+        ["Telegram", company.social.telegram, "telegram"],
+      ] as const
+    ).filter(([, value]) => Boolean(value?.trim()));
+
     return (
       <section className="sf-section" id="contact">
         <h2>{data.title}</h2>
         {data.body ? <p className="sf-body">{data.body}</p> : null}
         <ul className="sf-contact">
-          {data.email ? (
+          {email ? (
             <li>
-              <a href={`mailto:${data.email}`}>{data.email}</a>
+              <a href={toLinkHref("email", email)}>{email}</a>
             </li>
           ) : null}
-          {data.phone ? <li>{data.phone}</li> : null}
-          {data.address ? <li>{data.address}</li> : null}
+          {phone ? (
+            <li>
+              <a href={toLinkHref("phone", phone)}>{phone}</a>
+            </li>
+          ) : null}
+          {address ? <li>{address}</li> : null}
         </ul>
+        {socialEntries.length ? (
+          <div className="sf-social">
+            {socialEntries.map(([label, value, kind]) => (
+              <a
+                key={label}
+                className="sf-social-chip"
+                href={toLinkHref(kind, value)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {label}
+              </a>
+            ))}
+          </div>
+        ) : null}
       </section>
     );
   }

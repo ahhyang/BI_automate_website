@@ -30,6 +30,7 @@ const LABELS: Record<SectionKey, string> = {
   about: "About",
   services: "Services",
   products: "Products",
+  gallery: "Gallery",
   testimonials: "Testimonials",
   cta: "Call to action",
   contact: "Contact",
@@ -214,6 +215,80 @@ export function PreviewEditor({
             value={model.content[selected]}
             onChange={(next) => updateSection(selected, next)}
           />
+          {selected === "contact" ? (
+            <div className="mt-5 space-y-3 border-t border-line pt-4">
+              <p className="text-sm font-medium">Social & messaging links</p>
+              {(
+                [
+                  ["instagram", "Instagram"],
+                  ["facebook", "Facebook"],
+                  ["linkedin", "LinkedIn"],
+                  ["twitter", "X / Twitter"],
+                  ["youtube", "YouTube"],
+                  ["tiktok", "TikTok"],
+                  ["telegram", "Telegram"],
+                  ["whatsapp", "WhatsApp"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="block text-sm">
+                  {label}
+                  <input
+                    className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm"
+                    value={model.company.social[key]}
+                    onChange={(e) => {
+                      const social = { ...model.company.social, [key]: e.target.value };
+                      const company = {
+                        ...model.company,
+                        social,
+                        contact: {
+                          ...model.company.contact,
+                          whatsapp: key === "whatsapp" ? e.target.value : model.company.contact.whatsapp,
+                        },
+                      };
+                      setModel((prev) => ({ ...prev, company }));
+                      if (saveTimer.current) clearTimeout(saveTimer.current);
+                      saveTimer.current = setTimeout(() => {
+                        void fetch("/api/sites", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ siteId, company }),
+                        });
+                      }, 450);
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : null}
+          {selected === "gallery" && model.company.media.length ? (
+            <div className="mt-5 space-y-3 border-t border-line pt-4">
+              <p className="text-sm font-medium">Captions</p>
+              {model.company.media.map((item, index) => (
+                <label key={item.id} className="block text-sm">
+                  {item.filename || item.kind}
+                  <input
+                    className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm"
+                    value={item.caption}
+                    onChange={(e) => {
+                      const media = model.company.media.map((m, i) =>
+                        i === index ? { ...m, caption: e.target.value } : m,
+                      );
+                      const company = { ...model.company, media };
+                      setModel((prev) => ({ ...prev, company }));
+                      if (saveTimer.current) clearTimeout(saveTimer.current);
+                      saveTimer.current = setTimeout(() => {
+                        void fetch("/api/sites", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ siteId, company }),
+                        });
+                      }, 450);
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-4">
             <Button variant="ghost" onClick={() => void regenerate()} disabled={busy}>
               {busy ? "Rewriting…" : "Regenerate this section"}
