@@ -149,7 +149,7 @@ export function PreviewEditor({
   }
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[340px_1fr]">
+    <div className="grid min-h-[70vh] lg:grid-cols-[340px_1fr]">
       <aside className="flex max-h-screen flex-col border-r border-line bg-white">
         <div className="border-b border-line p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-accent">Customize</p>

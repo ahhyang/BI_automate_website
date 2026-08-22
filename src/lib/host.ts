@@ -19,12 +19,20 @@ export const RESERVED_SUBDOMAINS = new Set([
   "help",
   "docs",
   "blog",
+  "s",
+  "settings",
 ]);
 
 export const DEMO_SUBDOMAINS = ["hale-whitmore", "oak-ember", "northline"] as const;
 
 export function getRootDomain() {
   return process.env.NEXT_PUBLIC_ROOT_DOMAIN || "localhost:3000";
+}
+
+/** True when wildcard DNS isn't available (e.g. *.vercel.app). */
+export function usesPathSites() {
+  const root = getRootDomain();
+  return process.env.NEXT_PUBLIC_PATH_SITES === "1" || root.includes("vercel.app");
 }
 
 export function parseHost(hostHeader: string | null) {
@@ -64,11 +72,33 @@ export function parseHost(hostHeader: string | null) {
 export function siteUrl(subdomain: string, path = "/") {
   const root = getRootDomain();
   const protocol = root.includes("localhost") ? "http" : "https";
-  return `${protocol}://${subdomain}.${root}${path}`;
+  // On Vercel preview/production without wildcard DNS, serve at /s/{subdomain}
+  if (root.includes("vercel.app") || process.env.NEXT_PUBLIC_PATH_SITES === "1") {
+    const suffix = path === "/" ? "" : path;
+    return `${protocol}://${root}/s/${subdomain}${suffix}`;
+  }
+  const suffix = path === "/" ? "" : path;
+  return `${protocol}://${subdomain}.${root}${suffix}`;
 }
 
 export function appUrl(path = "/") {
   const root = getRootDomain();
   const protocol = root.includes("localhost") ? "http" : "https";
   return `${protocol}://${root}${path}`;
+}
+
+export function hostingLabel() {
+  return "Siteform Cloud";
+}
+
+export function databaseLabel() {
+  return "Managed Postgres (included)";
+}
+
+export function storageLabel(blobConfigured?: boolean) {
+  const on =
+    typeof blobConfigured === "boolean"
+      ? blobConfigured
+      : Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return on ? "Cloud media storage" : "App media storage";
 }
