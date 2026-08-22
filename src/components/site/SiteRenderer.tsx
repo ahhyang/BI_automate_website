@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import type {
   SiteContentMap,
@@ -24,9 +24,13 @@ function mixPageBg(templateId: SiteRenderModel["templateId"], brand: string) {
 export function SiteRenderer({
   model,
   preview = false,
+  selectedSection,
+  onSelectSection,
 }: {
   model: SiteRenderModel;
   preview?: boolean;
+  selectedSection?: SectionKey | null;
+  onSelectSection?: (key: SectionKey) => void;
 }) {
   const brand = model.brandColor || "#1A1714";
   const pageBg = mixPageBg(model.templateId, brand);
@@ -35,6 +39,7 @@ export function SiteRenderer({
   const order = model.sectionOrder.length
     ? model.sectionOrder
     : (Object.keys(model.content) as SectionKey[]);
+  const editable = Boolean(onSelectSection);
 
   const style = {
     "--sf-brand": brand,
@@ -52,7 +57,15 @@ export function SiteRenderer({
       <Nav model={model} />
       <main>
         {order.map((key) => (
-          <Section key={key} sectionKey={key} model={model} />
+          <EditableSection
+            key={key}
+            sectionKey={key}
+            selected={selectedSection === key}
+            editable={editable}
+            onSelect={onSelectSection}
+          >
+            <Section sectionKey={key} model={model} />
+          </EditableSection>
         ))}
       </main>
       {!model.hideBadge && !preview ? (
@@ -60,6 +73,42 @@ export function SiteRenderer({
           Built with Siteform
         </Link>
       ) : null}
+    </div>
+  );
+}
+
+function EditableSection({
+  sectionKey,
+  selected,
+  editable,
+  onSelect,
+  children,
+}: {
+  sectionKey: SectionKey;
+  selected: boolean;
+  editable: boolean;
+  onSelect?: (key: SectionKey) => void;
+  children: ReactNode;
+}) {
+  if (!editable) return children;
+  return (
+    <div
+      className={`sf-edit-wrap ${selected ? "is-selected" : ""}`}
+      onClick={(e) => {
+        e.preventDefault();
+        onSelect?.(sectionKey);
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(sectionKey);
+        }
+      }}
+    >
+      <span className="sf-edit-label">{sectionKey}</span>
+      {children}
     </div>
   );
 }

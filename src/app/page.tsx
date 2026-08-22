@@ -35,11 +35,10 @@ export default async function HomePage() {
       <section className="mx-auto max-w-4xl px-5 pb-10 pt-16 text-center">
         <p className="text-xs uppercase tracking-[0.22em] text-accent">No credit card for the free plan</p>
         <h1 className="mt-5 font-display text-5xl leading-[1.05] tracking-tight sm:text-7xl">
-          Turn your company doc into a live website in minutes.
+          Drop a PDF. Get a live website.
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-ink-soft">
-          Upload a logo and an about-us file. Check the details the AI extracted. Pick a template
-          or let it write a custom site. Publish on a subdomain — instantly.
+          We generate the whole site, then you drag sections and edit the copy. Publish when it looks right.
         </p>
         <div className="mt-8 flex justify-center gap-3">
           <ButtonLink href="/create" variant="accent">
@@ -92,8 +91,8 @@ export default async function HomePage() {
 
       <section className="mx-auto grid max-w-6xl gap-6 px-5 py-16 md:grid-cols-3">
         {[
-          ["1. Upload", "Logo plus a PDF, Word doc, or five short answers if you don't have a write-up."],
-          ["2. Check the facts", "Edit the extracted name, services, and phone number before anything is generated."],
+          ["1. Drop a PDF", "Company write-up or Word doc. Logo is optional. Generation starts as soon as you drop the file."],
+          ["2. Customize", "Drag sections to reorder. Click any block to edit headlines, services, and contact details."],
           ["3. Publish", "Live on a subdomain immediately. Custom domain is a Pro add-on, not a requirement."],
         ].map(([title, body]) => (
           <div key={title} className="rounded-3xl border border-line p-6">

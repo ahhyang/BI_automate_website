@@ -1,13 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SectionKey, SiteRenderModel, TemplateId } from "@/types/content";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { SectionKey, SiteContentMap, SiteRenderModel, TemplateId } from "@/types/content";
 import { TEMPLATE_IDS } from "@/types/content";
 import { SiteRenderer } from "@/components/site/SiteRenderer";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { ErrorNote } from "@/components/ui/Field";
+import { SectionFields } from "./SectionFields";
 import { UpgradePrompt } from "./UpgradePrompt";
+
+const LABELS: Record<SectionKey, string> = {
+  hero: "Hero",
+  about: "About",
+  services: "Services",
+  products: "Products",
+  testimonials: "Testimonials",
+  cta: "Call to action",
+  contact: "Contact",
+  footer: "Footer",
+};
 
 export function PreviewEditor({
   siteId,
@@ -21,56 +48,93 @@ export function PreviewEditor({
   const router = useRouter();
   const [model, setModel] = useState(initial);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const [selected, setSelected] = useState<SectionKey>("hero");
+  const [selected, setSelected] = useState<SectionKey>(initial.sectionOrder[0] || "hero");
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [upgrade, setUpgrade] = useState<"regenerations" | null>(null);
-  const current = model.content[selected] as Record<string, unknown> | undefined;
-  const json = useMemo(() => JSON.stringify(current ?? {}, null, 2), [current]);
-  const [draft, setDraft] = useState(json);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function saveSection(content: Record<string, unknown>) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
+
+  async function persistSection(key: SectionKey, content: SiteContentMap[SectionKey]) {
+    setSaving(true);
+    const res = await fetch("/api/sites", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siteId, section: { key, content } }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      setError("Couldn't save that change. Try again.");
+    }
+  }
+
+  function updateSection(key: SectionKey, content: SiteContentMap[SectionKey]) {
+    setModel((prev) => ({
+      ...prev,
+      content: { ...prev.content, [key]: content },
+    }));
+    setError("");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void persistSection(key, content);
+    }, 450);
+  }
+
+  async function persistOrder(order: SectionKey[]) {
     await fetch("/api/sites", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId, section: { key: selected, content } }),
+      body: JSON.stringify({ siteId, sectionOrder: order }),
     });
   }
 
-  async function applyDraft() {
-    try {
-      const parsed = JSON.parse(draft) as Record<string, unknown>;
-      setModel((prev) => ({
-        ...prev,
-        content: { ...prev.content, [selected]: parsed },
-      }));
-      await saveSection(parsed);
-      setError("");
-    } catch {
-      setError("That edit isn't valid. Keep it as JSON, or regenerate the section.");
-    }
+  async function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = model.sectionOrder.indexOf(active.id as SectionKey);
+    const newIndex = model.sectionOrder.indexOf(over.id as SectionKey);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const order = arrayMove(model.sectionOrder, oldIndex, newIndex);
+    setModel((prev) => ({ ...prev, sectionOrder: order }));
+    await persistOrder(order);
   }
 
   async function regenerate() {
     setBusy(true);
+    const current = model.content[selected];
     const res = await fetch("/api/regenerate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ siteId, sectionKey: selected, content: current }),
     });
-    const jsonRes = (await res.json()) as { content?: Record<string, unknown>; reason?: string; error?: string };
+    const jsonRes = (await res.json()) as {
+      content?: SiteContentMap[SectionKey];
+      reason?: string;
+      error?: string;
+    };
     setBusy(false);
     if (res.status === 402) {
       setUpgrade("regenerations");
       return;
     }
     if (!res.ok) {
-      setError(jsonRes.error || "Couldn't regenerate that section. Try editing the text instead.");
+      setError(jsonRes.error || "Couldn't regenerate that section. Edit the text instead.");
       return;
     }
     if (jsonRes.content) {
-      setModel((prev) => ({ ...prev, content: { ...prev.content, [selected]: jsonRes.content as never } }));
-      setDraft(JSON.stringify(jsonRes.content, null, 2));
+      setModel((prev) => ({
+        ...prev,
+        content: { ...prev.content, [selected]: jsonRes.content as never },
+      }));
+      await persistSection(selected, jsonRes.content);
     }
   }
 
@@ -83,91 +147,91 @@ export function PreviewEditor({
     });
   }
 
-  async function move(dir: -1 | 1) {
-    const order = [...model.sectionOrder];
-    const i = order.indexOf(selected);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]];
-    setModel((prev) => ({ ...prev, sectionOrder: order }));
-    await fetch("/api/sites", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId, sectionOrder: order }),
-    });
-  }
-
   return (
-    <div className="grid min-h-screen lg:grid-cols-[320px_1fr]">
-      <aside className="border-r border-line bg-white p-4">
-        <p className="text-xs uppercase tracking-[0.2em] text-accent">Step 5 · Edit</p>
-        <h1 className="mt-2 font-display text-3xl">Preview</h1>
-        <div className="mt-4 flex gap-2">
-          <button className={`text-xs ${device === "desktop" ? "underline" : ""}`} onClick={() => setDevice("desktop")}>
-            Desktop
-          </button>
-          <button className={`text-xs ${device === "mobile" ? "underline" : ""}`} onClick={() => setDevice("mobile")}>
-            Mobile
-          </button>
-        </div>
-        <label className="mt-4 block text-sm">
-          Template
-          <select
-            className="mt-1 w-full rounded-xl border border-line px-2 py-2"
-            value={model.templateId}
-            onChange={(e) => swapTemplate(e.target.value as TemplateId)}
-          >
-            {TEMPLATE_IDS.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="mt-3 block text-sm">
-          Section
-          <select
-            className="mt-1 w-full rounded-xl border border-line px-2 py-2"
-            value={selected}
-            onChange={(e) => {
-              const key = e.target.value as SectionKey;
-              setSelected(key);
-              setDraft(JSON.stringify(model.content[key] ?? {}, null, 2));
-            }}
-          >
-            {model.sectionOrder.map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="mt-2 flex gap-2 text-xs">
-          <button onClick={() => move(-1)}>Move up</button>
-          <button onClick={() => move(1)}>Move down</button>
-        </div>
-        <textarea
-          className="mt-3 h-56 w-full rounded-xl border border-line p-2 font-mono text-xs"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <div className="mt-2 flex flex-col gap-2">
-          <Button variant="ghost" onClick={applyDraft}>
-            Save section text
-          </Button>
-          <Button variant="ghost" onClick={regenerate} disabled={busy}>
-            {busy ? "Rewriting…" : "Regenerate this section"}
-          </Button>
-        </div>
-        {error ? (
-          <div className="mt-3">
-            <ErrorNote message={error} />
+    <div className="grid min-h-screen lg:grid-cols-[340px_1fr]">
+      <aside className="flex max-h-screen flex-col border-r border-line bg-white">
+        <div className="border-b border-line p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-accent">Customize</p>
+          <h1 className="mt-2 font-display text-3xl">Drag · edit · publish</h1>
+          <p className="mt-1 text-xs text-ink-soft">
+            {saving ? "Saving…" : "Changes autosave. Drag sections to reorder."}
+          </p>
+          <div className="mt-4 flex gap-3 text-xs">
+            <button
+              type="button"
+              className={device === "desktop" ? "underline" : ""}
+              onClick={() => setDevice("desktop")}
+            >
+              Desktop
+            </button>
+            <button
+              type="button"
+              className={device === "mobile" ? "underline" : ""}
+              onClick={() => setDevice("mobile")}
+            >
+              Mobile
+            </button>
           </div>
-        ) : null}
-        <div className="mt-6">
+          <label className="mt-3 block text-sm">
+            Template
+            <select
+              className="mt-1 w-full rounded-xl border border-line px-2 py-2"
+              value={model.templateId}
+              onChange={(e) => void swapTemplate(e.target.value as TemplateId)}
+            >
+              {TEMPLATE_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="border-b border-line p-4">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">Sections</p>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void onDragEnd(e)}>
+            <SortableContext items={model.sectionOrder} strategy={verticalListSortingStrategy}>
+              <ul className="space-y-1">
+                {model.sectionOrder.map((key) => (
+                  <SortableSectionRow
+                    key={key}
+                    id={key}
+                    label={LABELS[key]}
+                    active={selected === key}
+                    onSelect={() => setSelected(key)}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          <p className="mb-3 text-sm font-medium">{LABELS[selected]}</p>
+          <SectionFields
+            sectionKey={selected}
+            value={model.content[selected]}
+            onChange={(next) => updateSection(selected, next)}
+          />
+          <div className="mt-4">
+            <Button variant="ghost" onClick={() => void regenerate()} disabled={busy}>
+              {busy ? "Rewriting…" : "Regenerate this section"}
+            </Button>
+          </div>
+          {error ? (
+            <div className="mt-3">
+              <ErrorNote message={error} />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-line p-4">
           <Button
             onClick={() =>
-              isGuest ? router.push(`/signup?next=/sites/${siteId}/publish`) : router.push(`/sites/${siteId}/publish`)
+              isGuest
+                ? router.push(`/signup?next=/sites/${siteId}/publish`)
+                : router.push(`/sites/${siteId}/publish`)
             }
           >
             Publish
@@ -183,12 +247,65 @@ export function PreviewEditor({
           )}
         </div>
       </aside>
+
       <div className="overflow-auto bg-[#ddd2bf] p-4">
-        <div className={`mx-auto overflow-hidden rounded-2xl bg-white shadow ${device === "mobile" ? "max-w-[390px]" : "max-w-5xl"}`}>
-          <SiteRenderer model={model} preview />
+        <div
+          className={`mx-auto overflow-hidden rounded-2xl bg-white shadow ${
+            device === "mobile" ? "max-w-[390px]" : "max-w-5xl"
+          }`}
+        >
+          <SiteRenderer
+            model={model}
+            preview
+            selectedSection={selected}
+            onSelectSection={setSelected}
+          />
         </div>
       </div>
       {upgrade ? <UpgradePrompt reason={upgrade} onClose={() => setUpgrade(null)} /> : null}
     </div>
+  );
+}
+
+function SortableSectionRow({
+  id,
+  label,
+  active,
+  onSelect,
+}: {
+  id: SectionKey;
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li ref={setNodeRef} style={style}>
+      <div
+        className={`flex items-center gap-2 rounded-xl border px-2 py-2 text-sm ${
+          active ? "border-ink bg-paper" : "border-transparent hover:bg-paper/70"
+        } ${isDragging ? "opacity-70 shadow" : ""}`}
+      >
+        <button
+          type="button"
+          className="cursor-grab touch-none px-1 text-ink-soft active:cursor-grabbing"
+          aria-label={`Drag ${label}`}
+          {...attributes}
+          {...listeners}
+        >
+          ⋮⋮
+        </button>
+        <button type="button" className="flex-1 text-left" onClick={onSelect}>
+          {label}
+        </button>
+      </div>
+    </li>
   );
 }

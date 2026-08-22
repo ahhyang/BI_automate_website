@@ -210,6 +210,43 @@ h3,
   border-radius: 999px;
 }
 
+.sf-edit-wrap {
+  position: relative;
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 120ms ease;
+}
+
+.sf-edit-wrap:hover {
+  outline-color: color-mix(in srgb, var(--sf-brand, #c45c26) 45%, transparent);
+}
+
+.sf-edit-wrap.is-selected {
+  outline-color: var(--sf-brand, #c45c26);
+}
+
+.sf-edit-label {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 2;
+  border-radius: 999px;
+  background: #1a1714;
+  color: #f7f3ec;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sf-edit-wrap:hover .sf-edit-label,
+.sf-edit-wrap.is-selected .sf-edit-label {
+  opacity: 1;
+}
+
 @media (max-width: 800px) {
   .layout-split .sf-hero,
   .sf-footer {
