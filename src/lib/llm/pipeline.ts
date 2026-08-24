@@ -241,46 +241,139 @@ export async function extractCompanyData(input: {
 }): Promise<CompanyData> {
   const fallback = heuristicExtract(input.text, input.brandColor);
   const raw = await completeJson(
-    `You are a meticulous document-to-website extractor. Your job is to pull EVERY usable fact from the PDF/brochure/menu into structured JSON so a website can be built from the document alone.
+    `You convert a document into structured website fields. Be smart about document type.
 
-Return ONLY valid JSON matching this shape:
+Return ONLY valid JSON:
 {
+  "documentType": "resume" | "personal_brand" | "company" | "clinic" | "restaurant_menu" | "brochure" | "other",
   "name": string,
-  "tagline": string (sharp homepage line from their real positioning),
+  "tagline": string,
   "industry": string,
-  "description": string (3-6 sentences grounded in the document — who they are, what they do, who they serve),
+  "description": string,
   "services": [{"title": string, "description": string, "price": string}],
   "products": [{"title": string, "description": string, "price": string}],
   "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string, "hours": string},
   "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string, "youtube": string, "tiktok": string, "telegram": string, "whatsapp": string},
   "tone": "formal" | "friendly" | "technical",
   "uncertainFields": string[],
-  "highlights": string[] (important facts, differentiators, certifications, stats — verbatim when possible),
+  "highlights": string[],
   "faqs": [{"question": string, "answer": string}],
   "team": [{"name": string, "role": string, "bio": string}],
   "testimonials": [{"quote": string, "author": string, "role": string}]
 }
 
-Hard rules:
-- Extract ALL services, products, menu items, packages, treatments, or offerings listed in the document (up to 24 each). Include prices when shown.
-- Put opening hours / operating hours into contact.hours exactly as written when present.
-- Pull address, phone, email, WhatsApp, website, and socials only when present — never invent.
-- If the doc has FAQs, team bios, or client quotes, extract them; otherwise use empty arrays.
-- Prefer the document's own wording over marketing fluff you invent.
-- highlights should capture concrete facts (years of experience, locations, specialties, guarantees).
-- If something is missing, leave it empty and list the field in uncertainFields.`,
-    `Brand color sampled from logo: ${input.brandColor}\n\n--- DOCUMENT START ---\n${input.text.slice(0, SOURCE_TEXT_LIMIT)}\n--- DOCUMENT END ---`,
+Document-type rules (critical):
+1) RESUME / CV / KEY PERSONNEL PROFILE / personal profile:
+   - name = the PERSON's real name (e.g. "Yong Cherng Hann"), NEVER a section header like "KEY PERSONNEL PROFILE", "PROFESSIONAL SUMMARY", "EXPERIENCE", "EDUCATION".
+   - tagline = role / headline (e.g. "Software Engineer · Full-Stack & Mobile").
+   - industry = their field (e.g. "Software Engineering").
+   - description = rewrite professional summary into 3–5 website-ready sentences (still factual).
+   - services = capabilities they offer clients (e.g. Full-Stack Web, Flutter Mobile, AI/LLM Integration) — NOT phone/email/headers.
+   - products = notable projects/apps from the resume (title + one-line what it does).
+   - team = usually empty for a personal site (or one entry for themselves).
+   - highlights = achievements, years, stack, awards — NOT contact lines duplicated.
+2) COMPANY / CLINIC / BROCHURE / MENU:
+   - name = business/clinic brand name (not a form title).
+   - services/products = real offerings with prices when present.
+3) NEVER put phone, email, or address into services/products/highlights.
+4) NEVER invent contact details; empty string + uncertainFields if missing.
+5) Prefer real wording from the document.`,
+    `Brand color: ${input.brandColor}\n\n--- DOCUMENT ---\n${input.text.slice(0, SOURCE_TEXT_LIMIT)}\n--- END ---`,
     8192,
   );
 
-  if (!raw) return fallback;
+  if (!raw) return sanitizeStructuredCompany(fallback, input.text);
   const parsed = companyDataSchema.safeParse({
     ...(raw as object),
     brandColor: input.brandColor,
     palette: [input.brandColor],
   });
-  if (!parsed.success) return fallback;
-  return withSourceText(parsed.data, input.text);
+  if (!parsed.success) return sanitizeStructuredCompany(fallback, input.text);
+  return withSourceText(sanitizeStructuredCompany(parsed.data, input.text), input.text);
+}
+
+const HEADERISH =
+  /^(key\s+personnel|personnel\s+profile|professional\s+summary|work\s+experience|education|skills|contact|profile|curriculum\s+vitae|\bresume\b|\bcv\b|about\s+me|references)$/i;
+
+function looksLikeSectionHeader(value: string) {
+  const v = value.trim();
+  if (!v) return true;
+  if (HEADERISH.test(v)) return true;
+  if (v === v.toUpperCase() && v.length > 8 && v.length < 60 && !/[a-z]/.test(v)) return true;
+  return false;
+}
+
+function guessPersonName(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^#+\s*/, "").trim())
+    .filter(Boolean);
+  for (const line of lines.slice(0, 20)) {
+    if (looksLikeSectionHeader(line)) continue;
+    if (/@|https?:|phone|\+?\d[\d\s-]{6,}/i.test(line)) continue;
+    if (line.length >= 3 && line.length <= 60 && /[A-Za-z]/.test(line)) {
+      // Prefer lines that look like names (2–4 words, not all caps headers)
+      const words = line.split(/\s+/);
+      if (words.length >= 2 && words.length <= 5) return line.replace(/\s*\(.*\)\s*$/, "").trim();
+    }
+  }
+  return "";
+}
+
+/** Fix common bad mappings (headers as name, contact dumped into services). */
+export function sanitizeStructuredCompany(company: CompanyData, sourceText: string): CompanyData {
+  let name = company.name.trim();
+  let tagline = company.tagline.trim();
+  if (looksLikeSectionHeader(name) || /^key software/i.test(name)) {
+    name = guessPersonName(sourceText) || guessPersonName(company.description) || name;
+  }
+  if (looksLikeSectionHeader(tagline) || tagline.toLowerCase() === name.toLowerCase()) {
+    const roleLine = sourceText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) =>
+        /engineer|developer|designer|consultant|doctor|clinic|founder|specialist/i.test(l) &&
+        !looksLikeSectionHeader(l) &&
+        l.length < 80,
+      );
+    tagline = roleLine || company.industry || tagline;
+  }
+
+  const contactBits = new Set(
+    [company.contact.email, company.contact.phone, company.contact.whatsapp, company.contact.address]
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const cleanOffering = (items: CompanyData["services"]) =>
+    items.filter((item) => {
+      const t = item.title.trim();
+      if (!t || looksLikeSectionHeader(t)) return false;
+      if (contactBits.has(t.toLowerCase())) return false;
+      if (/^(phone|email|tel|whatsapp|address)\b/i.test(t)) return false;
+      if (t.toLowerCase() === name.toLowerCase()) return false;
+      return true;
+    });
+
+  const services = cleanOffering(company.services);
+  const products = cleanOffering(company.products);
+  const highlights = company.highlights.filter((h) => {
+    const t = h.trim();
+    if (!t || looksLikeSectionHeader(t)) return false;
+    if (contactBits.has(t.toLowerCase())) return false;
+    if (/^(phone|email)\b/i.test(t)) return false;
+    if (t.toLowerCase() === name.toLowerCase()) return false;
+    return true;
+  });
+
+  return companyDataSchema.parse({
+    ...company,
+    name: name || company.name,
+    tagline: tagline || company.tagline,
+    services,
+    products,
+    highlights,
+  });
 }
 
 export type DocumentPlanResult = {
@@ -302,79 +395,125 @@ export async function organizeDocumentForSite(input: {
   const source = input.text.slice(0, SOURCE_TEXT_LIMIT);
   const brandColor = input.brandColor || "#1A1714";
 
+  // If the text already looks like cleaned markdown, skip a redundant rewrite pass.
+  const alreadyMd = /^#\s+/m.test(source) && source.length > 200;
   const markdown =
-    (await completeText(
-      `You clean and structure messy document text into clear Markdown for a website build.
+    alreadyMd
+      ? source
+      : (await completeText(
+          `You clean and structure messy document text into clear Markdown for a website build.
 Output ONLY markdown. Use # / ## headings, lists, and tables when useful.
 Keep every factual detail: names, offerings, prices, hours, contacts, team, FAQs, testimonials.
 Do not invent content. Do not wrap in code fences.`,
-      `--- RAW DOCUMENT ---\n${source}\n--- END ---`,
-      8192,
-    )) || source;
+          `--- RAW DOCUMENT ---\n${source}\n--- END ---`,
+          8192,
+        )) || source;
 
-  const company = await extractCompanyData({ text: markdown, brandColor });
+  const bundled = await completeJson(
+    `You are a senior website strategist. From the document markdown, produce ONE JSON object with smart structured fields, a site plan, and a generation prompt.
 
-  const plan =
-    (await completeText(
-      `You are a website information architect. Given document markdown + structured company JSON, write a short SITE PLAN in markdown.
+Return ONLY JSON:
+{
+  "documentType": "resume" | "personal_brand" | "company" | "clinic" | "restaurant_menu" | "brochure" | "other",
+  "company": {
+    "name": string,
+    "tagline": string,
+    "industry": string,
+    "description": string,
+    "services": [{"title": string, "description": string, "price": string}],
+    "products": [{"title": string, "description": string, "price": string}],
+    "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string, "hours": string},
+    "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string, "youtube": string, "tiktok": string, "telegram": string, "whatsapp": string},
+    "tone": "formal" | "friendly" | "technical",
+    "uncertainFields": string[],
+    "highlights": string[],
+    "faqs": [{"question": string, "answer": string}],
+    "team": [{"name": string, "role": string, "bio": string}],
+    "testimonials": [{"quote": string, "author": string, "role": string}]
+  },
+  "plan": string (markdown site plan: sections, what facts go where, what not to invent),
+  "prompt": string (plain-text generation instructions for the website AI)
+}
 
-Include:
-1. Recommended page sections (in order) and why
-2. Which document facts go into Hero / About / Services / Products / Contact
-3. What must NOT be invented
-4. Tone note
+Smart mapping rules:
+- If this is a resume/CV/personnel profile: company.name = person's name; tagline = job title; services = skills/services they sell; products = portfolio projects; highlights = achievements. NEVER use section headers (KEY PERSONNEL PROFILE, PROFESSIONAL SUMMARY, etc.) as name or tagline. NEVER put phone/email into services or highlights.
+- If company/clinic/menu: name = brand; services/products = offerings with prices.
+- plan must be specific to THIS document (mention real name, real offerings/projects).
+- prompt must list the exact services/projects to include and forbid inventing contacts.
+- Merge any linksHint into contact/social when provided.`,
+    JSON.stringify({
+      brandColor,
+      linksHint: input.linksHint || "",
+      markdown: markdown.slice(0, 40_000),
+    }),
+    8192,
+  );
 
-Output ONLY the plan markdown — no code fences.`,
-      JSON.stringify(
-        {
-          markdown: markdown.slice(0, 20_000),
-          company: {
-            name: company.name,
-            tagline: company.tagline,
-            services: company.services,
-            products: company.products,
-            contact: company.contact,
-            highlights: company.highlights,
-            team: company.team,
-            faqs: company.faqs,
-          },
-          linksHint: input.linksHint || "",
-        },
-        null,
-        2,
-      ),
-      4096,
-    )) ||
-    `## Plan\n- Hero from tagline\n- About from description + highlights\n- Services/products from extracted offerings\n- Contact from document + links`;
+  let company: CompanyData;
+  let plan: string;
+  let prompt: string;
 
-  const prompt =
-    (await completeText(
-      `Write the exact generation prompt a website AI should follow for THIS business.
-It must instruct the model to use ONLY the provided document facts (offerings, prices, hours, contacts, team, FAQs).
-Include a checklist of offerings to place on the site.
-Output plain text (not JSON). No code fences.`,
-      JSON.stringify(
-        {
+  if (bundled && typeof bundled === "object") {
+    const data = bundled as {
+      company?: unknown;
+      plan?: string;
+      prompt?: string;
+    };
+    const parsed = companyDataSchema.safeParse({
+      ...(data.company as object),
+      brandColor,
+      palette: [brandColor],
+    });
+    company = sanitizeStructuredCompany(
+      parsed.success ? parsed.data : await extractCompanyData({ text: markdown, brandColor }),
+      markdown,
+    );
+    plan =
+      (typeof data.plan === "string" && data.plan.trim().length > 40
+        ? data.plan.trim()
+        : "") || "";
+    prompt =
+      (typeof data.prompt === "string" && data.prompt.trim().length > 40
+        ? data.prompt.trim()
+        : "") || "";
+  } else {
+    company = await extractCompanyData({ text: markdown, brandColor });
+    plan = "";
+    prompt = "";
+  }
+
+  if (!plan) {
+    plan =
+      (await completeText(
+        `Write a specific markdown SITE PLAN for this website. Mention the real name and real offerings/projects. No code fences.`,
+        JSON.stringify({
+          name: company.name,
+          tagline: company.tagline,
+          services: company.services,
+          products: company.products,
+          highlights: company.highlights,
+        }),
+        3000,
+      )) ||
+      `## Site plan for ${company.name}\n1. Hero — ${company.tagline || company.name}\n2. About — professional summary\n3. Services — ${company.services.map((s) => s.title).join(", ") || "capabilities"}\n4. Projects — ${company.products.map((p) => p.title).join(", ") || "portfolio"}\n5. Contact — email/phone from document only`;
+  }
+
+  if (!prompt) {
+    prompt =
+      (await completeText(
+        `Write generation instructions for a website AI. Be specific: list offerings/projects by name. Forbid inventing contacts. Plain text only.`,
+        JSON.stringify({
+          name: company.name,
+          tagline: company.tagline,
+          services: company.services,
+          products: company.products,
+          contact: company.contact,
           plan,
-          company: {
-            name: company.name,
-            tagline: company.tagline,
-            description: company.description,
-            services: company.services,
-            products: company.products,
-            contact: company.contact,
-            highlights: company.highlights,
-            team: company.team,
-            faqs: company.faqs,
-            testimonials: company.testimonials,
-          },
-        },
-        null,
-        2,
-      ),
-      4096,
-    )) ||
-    `Build a professional marketing site for ${company.name}. Use every service/product from the structured data. Never invent contact details. Follow the site plan.`;
+        }),
+        3000,
+      )) ||
+      `Build a professional site for ${company.name} (${company.tagline}).\nInclude services: ${company.services.map((s) => s.title).join("; ")}.\nInclude projects: ${company.products.map((p) => p.title).join("; ")}.\nUse only contact details from the structured data. Do not invent phone/email/address.`;
+  }
 
   const enriched = companyDataSchema.parse({
     ...company,

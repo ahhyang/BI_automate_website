@@ -180,13 +180,35 @@ export function DocumentWorkbench({
               }
             />
           </Field>
-          <Field label="Services / products (one per line — optional price after | )">
+          <Field label="Services / skills (one per line — optional price after | )">
             <textarea
               className={`${inputClass} min-h-32`}
               value={servicesText}
               disabled={busy}
               onChange={(e) => onServicesText(e.target.value)}
-              placeholder={"Allergy testing | RM 200\nImmunotherapy\nClinic consultation"}
+              placeholder={"Full-Stack Web Development\nFlutter Mobile Apps\nAI / LLM Integration"}
+            />
+          </Field>
+          <Field label="Projects / products (one per line) — edit in About if needed">
+            <textarea
+              className={`${inputClass} min-h-24`}
+              value={company.products.map((p) => (p.price ? `${p.title} | ${p.price}` : p.title)).join("\n")}
+              disabled={busy}
+              onChange={(e) =>
+                onCompany({
+                  ...company,
+                  products: e.target.value
+                    .split("\n")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                    .map((line) => {
+                      const [title, price] = line.split("|").map((p) => p.trim());
+                      const prev = company.products.find((p) => p.title === title);
+                      return { title, description: prev?.description || "", price: price || prev?.price || "" };
+                    }),
+                })
+              }
+              placeholder={"AI Health Assistant\nAI Food Scanner\nAI Recipe Generator"}
             />
           </Field>
           <Field label="Highlights (one per line)">
