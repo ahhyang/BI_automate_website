@@ -82,6 +82,12 @@ export const companyDataSchema = z.object({
   uncertainFields: z.array(z.string()).default([]),
   /** Full document text used to ground generation (truncated for storage). */
   sourceText: z.string().default(""),
+  /** Clean markdown extracted from the document (editable in Create). */
+  sourceMarkdown: z.string().default(""),
+  /** Site architecture plan shown to the user before generate. */
+  sitePlan: z.string().default(""),
+  /** Prompt that will drive AI Custom generation (editable). */
+  generationPrompt: z.string().default(""),
   /** Bullet facts / differentiators taken from the document. */
   highlights: z.array(z.string()).default([]),
   faqs: z.array(faqItemSchema).default([]),

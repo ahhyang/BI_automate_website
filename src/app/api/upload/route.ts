@@ -13,9 +13,9 @@ import { linksInputSchema } from "@/types/content";
 
 const MAX_MEDIA = 24;
 const MAX_BYTES = 4.5 * 1024 * 1024;
-const EXTRACT_TIMEOUT_MS = 45_000;
+const EXTRACT_TIMEOUT_MS = 55_000;
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 export const runtime = "nodejs";
 
 function isTextDoc(file: File) {
@@ -154,11 +154,13 @@ export async function POST(request: Request) {
           if (text.length > 80_000) text = text.slice(0, 80_000);
           if (!parsedText) parsedText = text;
           else parsedText += `\n\n${text}`;
-        } catch {
-          warnings.push(`Could not fully read “${doc.name}” — using the filename and your links.`);
-          if (!parsedText) {
-            parsedText = `Company document uploaded: ${doc.name}. Build a professional site from the filename and any contact links provided.`;
-          }
+        } catch (err) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : `Could not read “${doc.name}”. Paste the text or use a text-based PDF.`;
+          warnings.push(msg);
+          // Do NOT invent placeholder "Company document uploaded…" text — that poisons extraction.
         }
       }
 

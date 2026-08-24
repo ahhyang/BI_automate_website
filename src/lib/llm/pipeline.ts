@@ -63,6 +63,26 @@ async function completeJson(system: string, user: string, maxTokens = 4096) {
   }
 }
 
+async function completeText(system: string, user: string, maxTokens = 4096) {
+  const wired = client();
+  if (!wired) return null;
+  try {
+    const message = await wired.anthropic.messages.create({
+      model: wired.model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    return message.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
 function guessEmail(text: string) {
   return text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "";
 }
@@ -91,9 +111,11 @@ const CRITICAL_UNCERTAIN = new Set([
 const SOURCE_TEXT_LIMIT = 60_000;
 
 function withSourceText(company: CompanyData, text: string): CompanyData {
+  const clipped = (text || company.sourceText || "").slice(0, SOURCE_TEXT_LIMIT);
   return companyDataSchema.parse({
     ...company,
-    sourceText: (text || company.sourceText || "").slice(0, SOURCE_TEXT_LIMIT),
+    sourceText: clipped,
+    sourceMarkdown: company.sourceMarkdown?.trim() ? company.sourceMarkdown : clipped,
   });
 }
 
@@ -259,6 +281,117 @@ Hard rules:
   });
   if (!parsed.success) return fallback;
   return withSourceText(parsed.data, input.text);
+}
+
+export type DocumentPlanResult = {
+  markdown: string;
+  plan: string;
+  prompt: string;
+  company: CompanyData;
+};
+
+/**
+ * Turn raw document text into: clean Markdown → site plan → generation prompt → structured form data.
+ * Always shown to the user before Create generates the site.
+ */
+export async function organizeDocumentForSite(input: {
+  text: string;
+  brandColor: string;
+  linksHint?: string;
+}): Promise<DocumentPlanResult> {
+  const source = input.text.slice(0, SOURCE_TEXT_LIMIT);
+  const brandColor = input.brandColor || "#1A1714";
+
+  const markdown =
+    (await completeText(
+      `You clean and structure messy document text into clear Markdown for a website build.
+Output ONLY markdown. Use # / ## headings, lists, and tables when useful.
+Keep every factual detail: names, offerings, prices, hours, contacts, team, FAQs, testimonials.
+Do not invent content. Do not wrap in code fences.`,
+      `--- RAW DOCUMENT ---\n${source}\n--- END ---`,
+      8192,
+    )) || source;
+
+  const company = await extractCompanyData({ text: markdown, brandColor });
+
+  const plan =
+    (await completeText(
+      `You are a website information architect. Given document markdown + structured company JSON, write a short SITE PLAN in markdown.
+
+Include:
+1. Recommended page sections (in order) and why
+2. Which document facts go into Hero / About / Services / Products / Contact
+3. What must NOT be invented
+4. Tone note
+
+Output ONLY the plan markdown — no code fences.`,
+      JSON.stringify(
+        {
+          markdown: markdown.slice(0, 20_000),
+          company: {
+            name: company.name,
+            tagline: company.tagline,
+            services: company.services,
+            products: company.products,
+            contact: company.contact,
+            highlights: company.highlights,
+            team: company.team,
+            faqs: company.faqs,
+          },
+          linksHint: input.linksHint || "",
+        },
+        null,
+        2,
+      ),
+      4096,
+    )) ||
+    `## Plan\n- Hero from tagline\n- About from description + highlights\n- Services/products from extracted offerings\n- Contact from document + links`;
+
+  const prompt =
+    (await completeText(
+      `Write the exact generation prompt a website AI should follow for THIS business.
+It must instruct the model to use ONLY the provided document facts (offerings, prices, hours, contacts, team, FAQs).
+Include a checklist of offerings to place on the site.
+Output plain text (not JSON). No code fences.`,
+      JSON.stringify(
+        {
+          plan,
+          company: {
+            name: company.name,
+            tagline: company.tagline,
+            description: company.description,
+            services: company.services,
+            products: company.products,
+            contact: company.contact,
+            highlights: company.highlights,
+            team: company.team,
+            faqs: company.faqs,
+            testimonials: company.testimonials,
+          },
+        },
+        null,
+        2,
+      ),
+      4096,
+    )) ||
+    `Build a professional marketing site for ${company.name}. Use every service/product from the structured data. Never invent contact details. Follow the site plan.`;
+
+  const enriched = companyDataSchema.parse({
+    ...company,
+    sourceText: source,
+    sourceMarkdown: markdown.slice(0, SOURCE_TEXT_LIMIT),
+    sitePlan: plan.slice(0, 20_000),
+    generationPrompt: prompt.slice(0, 20_000),
+    brandColor,
+    palette: company.palette.length ? company.palette : [brandColor],
+  });
+
+  return {
+    markdown: enriched.sourceMarkdown,
+    plan: enriched.sitePlan,
+    prompt: enriched.generationPrompt,
+    company: enriched,
+  };
 }
 
 function formatOfferingLine(item: { title: string; description?: string; price?: string }) {
@@ -451,6 +584,7 @@ Return ONLY JSON:
 }
 
 Document-grounding rules (critical):
+- Follow generationPrompt and sitePlan when provided.
 - Use names, offerings, prices, hours, addresses, phone, email, WhatsApp, team, FAQs, and quotes FROM THE DOCUMENT / structured company JSON.
 - services.items and products.items MUST include every offering from the structured data (titles + descriptions + prices when available). Do not drop items to "look cleaner".
 - about.body should weave description + highlights + team + FAQs from the document (use line breaks). Keep it factual.
@@ -462,6 +596,8 @@ Document-grounding rules (critical):
 - ${mediaNote}`,
     JSON.stringify({
       company: companyWithoutSource,
+      generationPrompt: input.company.generationPrompt || "",
+      sitePlan: input.company.sitePlan || "",
       offeringChecklist: {
         services: input.company.services.map(formatOfferingLine),
         products: input.company.products.map(formatOfferingLine),

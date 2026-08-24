@@ -6,6 +6,7 @@ import type { CompanyData, LinksInput, MediaItem, TemplateId } from "@/types/con
 import { Button } from "@/components/ui/Button";
 import { ErrorNote, Field, inputClass } from "@/components/ui/Field";
 import { UpgradePrompt } from "./UpgradePrompt";
+import { DocumentWorkbench } from "./DocumentWorkbench";
 
 type Progress = "idle" | "reading" | "extracting" | "review" | "generating" | "done";
 
@@ -57,8 +58,8 @@ function progressPercent(
 
 function statusHeadline(progress: Progress, genSteps: { key: string; label: string; status: string }[]) {
   if (progress === "reading") return "Uploading your files and links…";
-  if (progress === "extracting") return "Reading the document and extracting company details…";
-  if (progress === "review") return "Quick check — confirm a few details before we design the site";
+  if (progress === "extracting") return "Extracting Markdown, planning the site, filling the form…";
+  if (progress === "review") return "Review Markdown, plan, prompt, and data — then create";
   if (progress === "generating") {
     const running = genSteps.find((s) => s.status === "running");
     return running ? `${running.label}…` : "Generating your website…";
@@ -96,6 +97,9 @@ export function UploadFlow() {
   const [reviewSiteId, setReviewSiteId] = useState<string | null>(null);
   const [reviewCompany, setReviewCompany] = useState<CompanyData | null>(null);
   const [reviewServices, setReviewServices] = useState("");
+  const [reviewMarkdown, setReviewMarkdown] = useState("");
+  const [reviewPlan, setReviewPlan] = useState("");
+  const [reviewPrompt, setReviewPrompt] = useState("");
 
   const logoUrl = useMemo(() => (logo ? URL.createObjectURL(logo) : null), [logo]);
   useEffect(() => {
@@ -236,21 +240,29 @@ export function UploadFlow() {
     }
     setError("");
     const services = reviewServices
-      .split(/\n|,/)
+      .split(/\n/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((title) => ({
-        title,
-        description:
-          reviewCompany.services.find((s) => s.title === title)?.description ||
-          `Learn more about ${title.toLowerCase()}.`,
-      }));
+      .map((line) => {
+        const [titlePart, pricePart] = line.split("|").map((p) => p.trim());
+        const existing = reviewCompany.services.find((s) => s.title === titlePart);
+        return {
+          title: titlePart,
+          description: existing?.description || "",
+          price: pricePart || existing?.price || "",
+        };
+      });
+
     const company: CompanyData = {
       ...reviewCompany,
       name: reviewCompany.name.trim(),
       tagline: reviewCompany.tagline.trim(),
       description: reviewCompany.description.trim(),
       services: services.length ? services : reviewCompany.services,
+      sourceText: reviewMarkdown || reviewCompany.sourceText,
+      sourceMarkdown: reviewMarkdown,
+      sitePlan: reviewPlan,
+      generationPrompt: reviewPrompt,
       uncertainFields: [],
     };
 
@@ -268,7 +280,6 @@ export function UploadFlow() {
         setError("Couldn't save those details. Try again.");
         return;
       }
-      setReviewCompany(null);
       await runGenerate(reviewSiteId, ac.signal);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -324,7 +335,7 @@ export function UploadFlow() {
       if (pasted) form.set("pasted", pasted);
       form.set("links", JSON.stringify(links));
 
-      const uploadTimer = window.setTimeout(() => ac.abort(), 90_000);
+      const uploadTimer = window.setTimeout(() => ac.abort(), 150_000);
       const uploadRes = await fetch("/api/upload", {
         method: "POST",
         body: form,
@@ -370,54 +381,83 @@ export function UploadFlow() {
 
       if (uploadJson.warning) setStatusDetail(uploadJson.warning);
 
+      const docText = (uploadJson.parsedText || pasted || "").trim();
+      if (docText.length < 80 && !(questions && q.companyName)) {
+        setProgress("idle");
+        setError(
+          uploadJson.warning ||
+            "We couldn't read text from that PDF (it may be a scan). Paste the document text below, then click Generate again.",
+        );
+        setAdvanced(true);
+        return;
+      }
+
       setProgress("extracting");
-      setStatusDetail("AI is reading your company details from the document…");
-      const extractRes = await fetch("/api/extract", {
+      setStatusDetail("Extracting Markdown → organizing plan → filling the data form…");
+
+      const prepareBody = questions
+        ? {
+            siteId: uploadJson.siteId,
+            brandColor: uploadJson.brandColor,
+            text: [
+              `Company: ${q.companyName}`,
+              `Tagline: ${q.oneLiner}`,
+              `Audience: ${q.audience}`,
+              `Offerings: ${q.offerings}`,
+              `Contact: ${q.contact}`,
+              docText,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            links: uploadJson.links || links,
+          }
+        : {
+            siteId: uploadJson.siteId,
+            text: docText,
+            brandColor: uploadJson.brandColor,
+            links: uploadJson.links || links,
+          };
+
+      const prepareRes = await fetch("/api/document/prepare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ac.signal,
-        body: JSON.stringify(
-          questions
-            ? {
-                siteId: uploadJson.siteId,
-                brandColor: uploadJson.brandColor,
-                questions: q,
-                links: uploadJson.links || links,
-                media: uploadJson.media || [],
-              }
-            : {
-                siteId: uploadJson.siteId,
-                text: uploadJson.parsedText || pasted || `Document: ${docs[0]?.name || "upload"}`,
-                brandColor: uploadJson.brandColor,
-                links: uploadJson.links || links,
-                media: uploadJson.media || [],
-              },
-        ),
+        body: JSON.stringify(prepareBody),
       });
-      const extractJson = (await extractRes.json().catch(() => ({}))) as {
+      const prepareJson = (await prepareRes.json().catch(() => ({}))) as {
         error?: string;
         company?: CompanyData;
-        needsReview?: boolean;
+        markdown?: string;
+        plan?: string;
+        prompt?: string;
+        code?: string;
       };
-      if (!extractRes.ok) {
+      if (!prepareRes.ok || !prepareJson.company) {
         setProgress("idle");
-        setError(extractJson.error || "We couldn't extract details. Try pasting text or the five questions.");
-        return;
-      }
-
-      if (extractJson.needsReview && extractJson.company) {
-        setReviewSiteId(uploadJson.siteId);
-        setReviewCompany(extractJson.company);
-        setReviewServices(
-          extractJson.company.services.map((s) => s.title).filter(Boolean).join("\n") ||
-            extractJson.company.products.map((s) => s.title).filter(Boolean).join("\n"),
+        setError(
+          prepareJson.error ||
+            "Couldn't organize the document. Paste the full text and try again.",
         );
-        setProgress("review");
-        setStatusDetail("Confirm name, tagline, and services — then continue.");
+        if (prepareJson.code === "no_document_text") setAdvanced(true);
         return;
       }
 
-      await runGenerate(uploadJson.siteId, ac.signal);
+      setReviewSiteId(uploadJson.siteId);
+      setReviewCompany(prepareJson.company);
+      setReviewMarkdown(prepareJson.markdown || prepareJson.company.sourceMarkdown || docText);
+      setReviewPlan(prepareJson.plan || prepareJson.company.sitePlan || "");
+      setReviewPrompt(prepareJson.prompt || prepareJson.company.generationPrompt || "");
+      setReviewServices(
+        prepareJson.company.services
+          .map((s) => (s.price ? `${s.title} | ${s.price}` : s.title))
+          .filter(Boolean)
+          .join("\n") ||
+          prepareJson.company.products
+            .map((s) => (s.price ? `${s.title} | ${s.price}` : s.title))
+            .join("\n"),
+      );
+      setProgress("review");
+      setStatusDetail("Review and edit, then create the site.");
     } catch (err) {
       setProgress("idle");
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -439,8 +479,8 @@ export function UploadFlow() {
       <p className="text-xs uppercase tracking-[0.2em] text-accent">Create</p>
       <h1 className="mt-3 font-display text-5xl">Drop everything you have.</h1>
       <p className="mt-3 max-w-2xl text-ink-soft">
-        Add files and links, choose AI Custom or Fast Template, then Generate. You&apos;ll land on
-        Preview — then Develop to edit, Project to host and publish.
+        We extract your PDF to Markdown, organize a plan, show the prompt and data form — you
+        confirm — then we create the site. Keep PDFs under ~4.5 MB.
       </p>
 
       <DropZone
@@ -603,7 +643,7 @@ export function UploadFlow() {
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button onClick={() => void runPipeline()} disabled={!canStart}>
-          {progress === "idle" ? "Generate site" : "Working…"}
+          {progress === "idle" ? "Extract & plan" : "Working…"}
         </Button>
         {progress !== "idle" && progress !== "done" ? (
           <button type="button" className="text-sm underline" onClick={cancel}>
@@ -620,77 +660,21 @@ export function UploadFlow() {
       </div>
 
       {progress === "review" && reviewCompany ? (
-        <div className="mt-8 rounded-3xl border border-line bg-white p-5">
-          <p className="text-xs uppercase tracking-[0.18em] text-accent">Quick review</p>
-          <h2 className="mt-2 font-display text-3xl">Confirm what we found</h2>
-          <p className="mt-2 text-sm text-ink-soft">
-            Extraction was incomplete or uncertain. Fix anything wrong, then continue — this makes AI
-            Custom much better.
-          </p>
-          <div className="mt-5 grid gap-3">
-            <Field label="Company name">
-              <input
-                className={inputClass}
-                value={reviewCompany.name}
-                onChange={(e) => setReviewCompany({ ...reviewCompany, name: e.target.value })}
-              />
-            </Field>
-            <Field label="Tagline">
-              <input
-                className={inputClass}
-                value={reviewCompany.tagline}
-                onChange={(e) => setReviewCompany({ ...reviewCompany, tagline: e.target.value })}
-              />
-            </Field>
-            <Field label="About / description">
-              <textarea
-                className={`${inputClass} min-h-24`}
-                value={reviewCompany.description}
-                onChange={(e) => setReviewCompany({ ...reviewCompany, description: e.target.value })}
-              />
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Email">
-                <input
-                  className={inputClass}
-                  value={reviewCompany.contact.email}
-                  onChange={(e) =>
-                    setReviewCompany({
-                      ...reviewCompany,
-                      contact: { ...reviewCompany.contact, email: e.target.value },
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Phone">
-                <input
-                  className={inputClass}
-                  value={reviewCompany.contact.phone}
-                  onChange={(e) =>
-                    setReviewCompany({
-                      ...reviewCompany,
-                      contact: { ...reviewCompany.contact, phone: e.target.value },
-                    })
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Services / products (one per line)">
-              <textarea
-                className={`${inputClass} min-h-24`}
-                value={reviewServices}
-                onChange={(e) => setReviewServices(e.target.value)}
-                placeholder={"Allergy testing\nImmunotherapy\nClinic consultation"}
-              />
-            </Field>
-          </div>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Button onClick={() => void continueAfterReview()}>Continue to generate</Button>
-            <button type="button" className="text-sm underline" onClick={cancel}>
-              Start over
-            </button>
-          </div>
-        </div>
+        <DocumentWorkbench
+          company={reviewCompany}
+          markdown={reviewMarkdown}
+          plan={reviewPlan}
+          prompt={reviewPrompt}
+          servicesText={reviewServices}
+          onCompany={setReviewCompany}
+          onMarkdown={setReviewMarkdown}
+          onPlan={setReviewPlan}
+          onPrompt={setReviewPrompt}
+          onServicesText={setReviewServices}
+          onCreate={() => void continueAfterReview()}
+          onCancel={cancel}
+          busy={false}
+        />
       ) : null}
 
       {progress !== "idle" && progress !== "review" ? (
