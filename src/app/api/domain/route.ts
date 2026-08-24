@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
+import { getSession, ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { getEntitlements } from "@/lib/usage";
+import { isOpenAccess } from "@/lib/plans";
 
 async function addVercelDomain(domain: string) {
   const token = process.env.VERCEL_TOKEN;
@@ -28,8 +29,9 @@ async function addVercelDomain(domain: string) {
 }
 
 export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || session.isGuest) {
+  const open = isOpenAccess();
+  const session = open ? await ensureGuestSession() : await getSession();
+  if (!session || (session.isGuest && !open)) {
     return NextResponse.json({ error: "Create an account first." }, { status: 401 });
   }
   const entitlements = await getEntitlements(session.tenantId);

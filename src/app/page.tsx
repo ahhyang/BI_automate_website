@@ -33,7 +33,7 @@ export default async function HomePage() {
       </header>
 
       <section className="mx-auto max-w-4xl px-5 pb-10 pt-16 text-center">
-        <p className="text-xs uppercase tracking-[0.22em] text-accent">No credit card for the free plan</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-accent">Free to test · no payment required</p>
         <h1 className="mt-5 font-display text-5xl leading-[1.05] tracking-tight sm:text-7xl">
           Drop your files and links. Get a website.
         </h1>

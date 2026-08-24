@@ -303,23 +303,11 @@ export function PreviewEditor({
 
         <div className="border-t border-line p-4">
           <Button
-            onClick={() =>
-              isGuest
-                ? router.push(`/signup?next=/sites/${siteId}/publish`)
-                : router.push(`/sites/${siteId}/publish`)
-            }
+            onClick={() => router.push(`/sites/${siteId}/publish`)}
           >
             Publish
           </Button>
-          {isGuest ? (
-            <p className="mt-2 text-xs text-ink-soft">Create a free account to publish and keep this site.</p>
-          ) : (
-            <div className="mt-3">
-              <ButtonLink href={`/sites/${siteId}/publish`} variant="ghost">
-                Continue to publish
-              </ButtonLink>
-            </div>
-          )}
+          <p className="mt-2 text-xs text-ink-soft">Free to test — no payment required.</p>
         </div>
       </aside>
 

@@ -1,19 +1,21 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
+import { getSession, ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { siteUrl } from "@/lib/host";
+import { isOpenAccess } from "@/lib/plans";
 
 export async function POST(request: Request) {
-  const session = await getSession();
+  const open = isOpenAccess();
+  const session = open ? await ensureGuestSession() : await getSession();
   if (!session) {
     return NextResponse.json(
       { error: "Create a free account to publish and keep this site." },
       { status: 401 },
     );
   }
-  if (session.isGuest) {
+  if (session.isGuest && !open) {
     return NextResponse.json(
       { error: "Create a free account to publish and keep this site.", code: "signup_required" },
       { status: 401 },

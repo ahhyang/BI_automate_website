@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { usageCounters, tenants, sites } from "./db/schema";
-import { getPlan, type PlanId } from "./plans";
+import { getPlan, isOpenAccess, type PlanId } from "./plans";
 
 export function currentPeriod() {
   const now = new Date();
@@ -52,7 +52,8 @@ export async function incrementUsage(
 export async function getEntitlements(tenantId: string) {
   const db = getDb();
   const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
-  const plan = getPlan(tenant?.plan as PlanId);
+  const open = isOpenAccess();
+  const plan = open ? getPlan("pro") : getPlan(tenant?.plan as PlanId);
   const [siteRows] = await db
     .select({ count: sql<number>`count(*)` })
     .from(sites)
@@ -65,11 +66,12 @@ export async function getEntitlements(tenantId: string) {
     plan,
     siteCount,
     usage,
-    canCreateSite: siteCount < plan.siteLimit,
-    canUseAiCustom: plan.aiCustomEnabled || Boolean(tenant && !tenant.aiCustomTrialUsed),
-    canRegenerate: usage.regenerationsUsed < plan.regenerationsPerMonth,
-    canCustomDomain: plan.customDomain,
-    showBadge: !plan.hideBadge,
-    analytics: plan.analytics,
+    openAccess: open,
+    canCreateSite: open || siteCount < plan.siteLimit,
+    canUseAiCustom: open || plan.aiCustomEnabled || Boolean(tenant && !tenant.aiCustomTrialUsed),
+    canRegenerate: open || usage.regenerationsUsed < plan.regenerationsPerMonth,
+    canCustomDomain: open || plan.customDomain,
+    showBadge: open ? false : !plan.hideBadge,
+    analytics: open || plan.analytics,
   };
 }

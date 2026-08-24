@@ -70,13 +70,19 @@ export function PublishPanel({
   }
 
   async function publish() {
-    if (isGuest) {
-      router.push(`/signup?next=/sites/${siteId}/publish`);
-      return;
-    }
     setError("");
     setBusy(true);
-    await saveSubdomain();
+    const saved = await fetch("/api/sites", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siteId, subdomain }),
+    });
+    if (!saved.ok) {
+      const json = (await saved.json()) as { error?: string };
+      setBusy(false);
+      setError(json.error || "Couldn't save that address.");
+      return;
+    }
     const res = await fetch("/api/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -84,7 +90,7 @@ export function PublishPanel({
     });
     const json = (await res.json()) as { url?: string; error?: string; code?: string };
     setBusy(false);
-    if (res.status === 401) {
+    if (res.status === 401 && json.code === "signup_required") {
       router.push(`/signup?next=/sites/${siteId}/publish`);
       return;
     }
@@ -259,7 +265,7 @@ export function PublishPanel({
       ) : (
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <Button onClick={() => void publish()} disabled={busy}>
-            {isGuest ? "Sign up to publish" : busy ? "Publishing…" : "Publish now"}
+            {busy ? "Publishing…" : "Publish now — free to test"}
           </Button>
           <ButtonLink href={`/sites/${siteId}/preview`} variant="ghost">
             Back to editor
