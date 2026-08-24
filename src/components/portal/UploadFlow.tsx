@@ -745,6 +745,10 @@ export function UploadFlow() {
               <option value="modern">Modern</option>
               <option value="bold">Bold</option>
               <option value="editorial">Editorial</option>
+              <option value="glass">Glass</option>
+              <option value="aurora">Aurora</option>
+              <option value="noir">Noir</option>
+              <option value="meadow">Meadow</option>
             </select>
           </label>
           <button type="button" className="text-sm underline" onClick={() => setQuestions((v) => !v)}>

@@ -50,6 +50,26 @@ export const socialLinksSchema = z.object({
 
 export type SocialLinks = z.infer<typeof socialLinksSchema>;
 
+export const FONT_PAIRS = ["auto", "elegant", "geometric", "editorial", "tech"] as const;
+export type FontPair = (typeof FONT_PAIRS)[number];
+
+export const MOTION_LEVELS = ["off", "subtle", "lively"] as const;
+export type MotionLevel = (typeof MOTION_LEVELS)[number];
+
+export const themeSettingsSchema = z.object({
+  fontPair: z.enum(FONT_PAIRS).default("auto"),
+  motion: z.enum(MOTION_LEVELS).default("lively"),
+  cursorGlow: z.boolean().default(true),
+});
+
+export type ThemeSettings = z.infer<typeof themeSettingsSchema>;
+
+export const DEFAULT_THEME: ThemeSettings = {
+  fontPair: "auto",
+  motion: "lively",
+  cursorGlow: true,
+};
+
 export const companyDataSchema = z.object({
   name: z.string().min(1),
   tagline: z.string().default(""),
@@ -102,6 +122,8 @@ export const companyDataSchema = z.object({
       }),
     )
     .default([]),
+  /** Visual customization for the published site (fonts, motion, cursor). */
+  siteTheme: themeSettingsSchema.optional(),
 });
 
 export type CompanyData = z.infer<typeof companyDataSchema>;
@@ -199,8 +221,31 @@ export type SiteContentMap = {
   footer: z.infer<typeof footerContentSchema>;
 };
 
-export const TEMPLATE_IDS = ["classic", "modern", "bold", "editorial"] as const;
+export const TEMPLATE_IDS = [
+  "classic",
+  "modern",
+  "bold",
+  "editorial",
+  "glass",
+  "aurora",
+  "noir",
+  "meadow",
+] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
+
+export const TEMPLATE_META: Record<
+  TemplateId,
+  { label: string; blurb: string }
+> = {
+  classic: { label: "Classic", blurb: "Warm serif, timeless brochure" },
+  modern: { label: "Modern", blurb: "Clean sans, airy layout" },
+  bold: { label: "Bold", blurb: "Brand-color full bleed" },
+  editorial: { label: "Editorial", blurb: "Magazine serif storytelling" },
+  glass: { label: "Glass", blurb: "Glassmorphism + soft glow" },
+  aurora: { label: "Aurora", blurb: "Animated gradient atmosphere" },
+  noir: { label: "Noir", blurb: "Dark, sharp, high contrast" },
+  meadow: { label: "Meadow", blurb: "Fresh green, open & calm" },
+};
 
 export const LAYOUT_VARIANTS = ["standard", "split", "stacked", "asymmetric"] as const;
 export type LayoutVariant = (typeof LAYOUT_VARIANTS)[number];
@@ -214,6 +259,7 @@ export type SiteRenderModel = {
   brandColor: string;
   palette: string[];
   hideBadge: boolean;
+  theme: ThemeSettings;
   company: CompanyData;
   content: Partial<SiteContentMap>;
   sectionOrder: SectionKey[];

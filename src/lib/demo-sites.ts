@@ -1,6 +1,6 @@
 import { DEMO_SUBDOMAINS } from "./host";
 import { emptyCompany } from "./sites";
-import type { SiteRenderModel } from "@/types/content";
+import { DEFAULT_THEME, type SiteRenderModel } from "@/types/content";
 
 export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderModel> = {
   "hale-whitmore": {
@@ -12,6 +12,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#3D2B1F",
     palette: ["#3D2B1F", "#C4A574", "#F7F3EC"],
     hideBadge: true,
+    theme: DEFAULT_THEME,
     company: emptyCompany({
       name: "Hale & Whitmore",
       tagline: "Counsel for closely held companies.",
@@ -104,6 +105,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#8B3A2A",
     palette: ["#8B3A2A", "#E8C9A8", "#FBF6EE"],
     hideBadge: true,
+    theme: DEFAULT_THEME,
     company: emptyCompany({
       name: "Oak & Ember Bakery",
       tagline: "Bread, pastry, and a table by the window.",
@@ -195,6 +197,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#0F4C4C",
     palette: ["#0F4C4C", "#1FA6A6", "#F4F7F6"],
     hideBadge: true,
+    theme: DEFAULT_THEME,
     company: emptyCompany({
       name: "Northline Analytics",
       tagline: "Operational reporting that operators will actually open.",

@@ -1,25 +1,57 @@
 import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import type {
+  FontPair,
   SiteContentMap,
   SiteRenderModel,
   SectionKey,
+  TemplateId,
+  ThemeSettings,
 } from "@/types/content";
-import { toLinkHref } from "@/types/content";
+import { DEFAULT_THEME, toLinkHref } from "@/types/content";
 import { contrastText, ensureContrast } from "@/lib/color-utils";
+import { SiteAtmosphere } from "./SiteAtmosphere";
 
-const FONT: Record<SiteRenderModel["templateId"], { display: string; body: string }> = {
-  classic: { display: "var(--font-display)", body: "var(--font-sans)" },
-  modern: { display: "var(--font-sans)", body: "var(--font-sans)" },
-  bold: { display: "var(--font-display)", body: "var(--font-sans)" },
-  editorial: { display: "var(--font-display)", body: "var(--font-sans)" },
+const TEMPLATE_FONTS: Record<TemplateId, { display: string; body: string }> = {
+  classic: { display: "var(--font-newsreader)", body: "var(--font-geist-sans)" },
+  modern: { display: "var(--font-geist-sans)", body: "var(--font-geist-sans)" },
+  bold: { display: "var(--font-syne)", body: "var(--font-geist-sans)" },
+  editorial: { display: "var(--font-fraunces)", body: "var(--font-geist-sans)" },
+  glass: { display: "var(--font-syne)", body: "var(--font-dm-sans)" },
+  aurora: { display: "var(--font-fraunces)", body: "var(--font-dm-sans)" },
+  noir: { display: "var(--font-space)", body: "var(--font-dm-sans)" },
+  meadow: { display: "var(--font-newsreader)", body: "var(--font-dm-sans)" },
 };
 
-function mixPageBg(templateId: SiteRenderModel["templateId"], brand: string) {
+const PAIR_FONTS: Record<Exclude<FontPair, "auto">, { display: string; body: string }> = {
+  elegant: { display: "var(--font-fraunces)", body: "var(--font-dm-sans)" },
+  geometric: { display: "var(--font-syne)", body: "var(--font-geist-sans)" },
+  editorial: { display: "var(--font-newsreader)", body: "var(--font-geist-sans)" },
+  tech: { display: "var(--font-space)", body: "var(--font-dm-sans)" },
+};
+
+function resolveFonts(templateId: TemplateId, fontPair: FontPair) {
+  if (fontPair !== "auto") return PAIR_FONTS[fontPair];
+  return TEMPLATE_FONTS[templateId] || TEMPLATE_FONTS.classic;
+}
+
+function mixPageBg(templateId: TemplateId, brand: string) {
   if (templateId === "bold") return brand;
   if (templateId === "modern") return "#F4F7F6";
   if (templateId === "editorial") return "#FBF6EE";
+  if (templateId === "glass") return "#0B1220";
+  if (templateId === "aurora") return "#0F1B2D";
+  if (templateId === "noir") return "#0A0A0B";
+  if (templateId === "meadow") return "#E8F0E6";
   return "#F7F3EC";
+}
+
+function defaultInk(templateId: TemplateId, pageBg: string, brand: string) {
+  if (templateId === "bold") return contrastText(brand);
+  if (templateId === "glass" || templateId === "aurora" || templateId === "noir") {
+    return ensureContrast(pageBg, "#F4F7FB");
+  }
+  return ensureContrast(pageBg, "#1A1714");
 }
 
 export function SiteRenderer({
@@ -33,10 +65,11 @@ export function SiteRenderer({
   selectedSection?: SectionKey | null;
   onSelectSection?: (key: SectionKey) => void;
 }) {
+  const theme: ThemeSettings = model.theme || model.company.siteTheme || DEFAULT_THEME;
   const brand = model.brandColor || "#1A1714";
   const pageBg = mixPageBg(model.templateId, brand);
-  const ink = ensureContrast(pageBg, model.templateId === "bold" ? contrastText(brand) : "#1A1714");
-  const fonts = FONT[model.templateId];
+  const ink = defaultInk(model.templateId, pageBg, brand);
+  const fonts = resolveFonts(model.templateId, theme.fontPair || "auto");
   const order = model.sectionOrder.length
     ? model.sectionOrder
     : (Object.keys(model.content) as SectionKey[]);
@@ -48,33 +81,40 @@ export function SiteRenderer({
     "--sf-bg": pageBg,
     "--sf-display": fonts.display,
     "--sf-body": fonts.body,
+    "--sf-glow": brand,
     fontFamily: fonts.body,
     background: pageBg,
     color: ink,
   } as CSSProperties;
 
   return (
-    <div className={`site-root template-${model.templateId} layout-${model.layoutVariant}`} style={style}>
-      <Nav model={model} />
-      <main>
-        {order.map((key) => (
-          <EditableSection
-            key={key}
-            sectionKey={key}
-            selected={selectedSection === key}
-            editable={editable}
-            onSelect={onSelectSection}
-          >
-            <Section sectionKey={key} model={model} />
-          </EditableSection>
-        ))}
-      </main>
-      {!model.hideBadge && !preview ? (
-        <Link className="powered-by" href="/">
-          Built with Siteform
-        </Link>
-      ) : null}
-    </div>
+    <SiteAtmosphere theme={theme}>
+      <div
+        className={`site-root template-${model.templateId} layout-${model.layoutVariant}`}
+        style={style}
+      >
+        <div className="sf-bg-layer" aria-hidden />
+        <Nav model={model} />
+        <main>
+          {order.map((key) => (
+            <EditableSection
+              key={key}
+              sectionKey={key}
+              selected={selectedSection === key}
+              editable={editable}
+              onSelect={onSelectSection}
+            >
+              <Section sectionKey={key} model={model} />
+            </EditableSection>
+          ))}
+        </main>
+        {!model.hideBadge && !preview ? (
+          <Link className="powered-by" href="/">
+            Built with Siteform
+          </Link>
+        ) : null}
+      </div>
+    </SiteAtmosphere>
   );
 }
 
@@ -176,7 +216,7 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
         <h2>{data.title}</h2>
         <div className="sf-grid">
           {data.items.map((item) => (
-            <article key={item.title} className="sf-card">
+            <article key={item.title} className="sf-card sf-tilt">
               <h3>{item.title}</h3>
               <p>{item.description}</p>
             </article>
@@ -194,7 +234,7 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
         <h2>{data.title}</h2>
         <div className="sf-quotes">
           {data.items.map((item) => (
-            <blockquote key={item.quote}>
+            <blockquote key={item.quote} className="sf-tilt">
               <p>“{item.quote}”</p>
               <footer>
                 {item.author}
@@ -231,7 +271,7 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
         {data.body ? <p className="sf-body">{data.body}</p> : null}
         <div className="sf-gallery">
           {items.map((item) => (
-            <figure key={item.id} className="sf-gallery-item">
+            <figure key={item.id} className="sf-gallery-item sf-tilt">
               {item.kind === "photo" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={item.url} alt={item.caption || item.filename || "Photo"} />

@@ -45,7 +45,48 @@ h3,
 }
 
 .site-root {
+  position: relative;
   min-height: 100vh;
+  overflow: clip;
+}
+
+.sf-atmosphere {
+  position: relative;
+}
+
+.sf-cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 360px;
+  height: 360px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--sf-glow, #5eead4) 34%, transparent) 0%,
+    transparent 68%
+  );
+  mix-blend-mode: soft-light;
+  opacity: 0.85;
+  will-change: transform;
+}
+
+.motion-off .sf-cursor-glow {
+  display: none;
+}
+
+.sf-bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.site-root > *:not(.sf-bg-layer) {
+  position: relative;
+  z-index: 1;
 }
 
 .sf-nav {
@@ -139,6 +180,12 @@ h3,
   border-radius: 999px;
   font-weight: 600;
   text-decoration: none;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.motion-lively .sf-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--sf-brand) 28%, transparent);
 }
 
 .sf-btn-invert {
@@ -158,11 +205,16 @@ h3,
   border: 1px solid color-mix(in srgb, var(--sf-ink) 12%, transparent);
   padding: 1.4rem;
   border-radius: 1.25rem;
+  transition: transform 220ms ease, border-color 220ms ease, background 220ms ease;
 }
 
 .sf-card h3 {
   font-size: 1.2rem;
   margin-bottom: 0.5rem;
+}
+
+.motion-lively .sf-tilt:hover {
+  transform: translateY(-4px);
 }
 
 .layout-split .sf-hero {
@@ -206,6 +258,11 @@ h3,
   text-decoration: none;
   font-size: 0.85rem;
   font-weight: 600;
+  transition: transform 180ms ease;
+}
+
+.motion-lively .sf-social-chip:hover {
+  transform: translateY(-2px);
 }
 
 .sf-gallery {
@@ -275,6 +332,7 @@ h3,
   position: fixed;
   right: 1rem;
   bottom: 1rem;
+  z-index: 20;
   background: #1a1714;
   color: #f7f3ec;
   font-size: 0.75rem;
@@ -319,12 +377,154 @@ h3,
   opacity: 1;
 }
 
+.sf-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 700ms ease, transform 700ms ease;
+}
+
+.sf-reveal.sf-reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+.motion-off .sf-reveal {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
+.motion-subtle .sf-reveal {
+  transform: translateY(8px);
+  transition-duration: 500ms;
+}
+
+.template-glass .sf-bg-layer {
+  background:
+    radial-gradient(900px 500px at 15% 10%, color-mix(in srgb, var(--sf-brand) 35%, transparent), transparent 60%),
+    radial-gradient(700px 420px at 85% 20%, color-mix(in srgb, #5eead4 22%, transparent), transparent 55%),
+    linear-gradient(160deg, #0b1220, #121a2b 50%, #0a101c);
+}
+
+.template-glass .sf-nav {
+  background: color-mix(in srgb, white 8%, transparent);
+  border-bottom-color: color-mix(in srgb, white 14%, transparent);
+}
+
+.template-glass .sf-card,
+.template-glass .sf-quotes blockquote,
+.template-glass .sf-gallery-item,
+.template-glass .sf-cta {
+  background: color-mix(in srgb, white 10%, transparent);
+  border: 1px solid color-mix(in srgb, white 18%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: 0 10px 40px color-mix(in srgb, black 25%, transparent);
+}
+
+.template-glass .sf-btn {
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--sf-brand) 35%, transparent);
+}
+
+.template-aurora .sf-bg-layer {
+  background:
+    radial-gradient(800px 480px at 20% 0%, color-mix(in srgb, var(--sf-brand) 40%, transparent), transparent 60%),
+    radial-gradient(640px 420px at 80% 10%, color-mix(in srgb, #38bdf8 28%, transparent), transparent 55%),
+    radial-gradient(520px 360px at 50% 80%, color-mix(in srgb, #34d399 18%, transparent), transparent 60%),
+    #0f1b2d;
+  animation: sf-aurora 14s ease-in-out infinite alternate;
+}
+
+@keyframes sf-aurora {
+  from {
+    filter: hue-rotate(0deg) saturate(1);
+  }
+  to {
+    filter: hue-rotate(18deg) saturate(1.15);
+  }
+}
+
+.motion-off .template-aurora .sf-bg-layer {
+  animation: none;
+}
+
+.template-aurora .sf-card,
+.template-aurora .sf-quotes blockquote {
+  background: color-mix(in srgb, white 8%, transparent);
+  border-color: color-mix(in srgb, white 16%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.template-aurora .sf-nav {
+  background: color-mix(in srgb, #0f1b2d 70%, transparent);
+}
+
+.template-noir .sf-bg-layer {
+  background:
+    radial-gradient(700px 400px at 70% 0%, color-mix(in srgb, var(--sf-brand) 22%, transparent), transparent 60%),
+    #0a0a0b;
+}
+
+.template-noir .sf-hero h1 {
+  letter-spacing: -0.05em;
+}
+
+.template-noir .sf-card,
+.template-noir .sf-quotes blockquote {
+  border-radius: 0.35rem;
+  border-color: color-mix(in srgb, white 14%, transparent);
+  background: #121214;
+}
+
+.template-noir .sf-btn {
+  border-radius: 0.35rem;
+}
+
+.template-noir .sf-nav {
+  background: color-mix(in srgb, black 55%, transparent);
+  border-bottom-color: color-mix(in srgb, white 10%, transparent);
+}
+
+.template-meadow .sf-bg-layer {
+  background:
+    radial-gradient(900px 420px at 10% 0%, color-mix(in srgb, var(--sf-brand) 18%, transparent), transparent 55%),
+    linear-gradient(180deg, #eef5eb, #e8f0e6 40%, #f7faf5);
+}
+
+.template-meadow .sf-card,
+.template-meadow .sf-quotes blockquote {
+  background: color-mix(in srgb, white 72%, transparent);
+  border-color: color-mix(in srgb, #2f6d4f 14%, transparent);
+  border-radius: 1.5rem;
+}
+
+.template-meadow .sf-nav {
+  background: color-mix(in srgb, #eef5eb 75%, transparent);
+}
+
 @media (max-width: 800px) {
   .layout-split .sf-hero,
   .sf-footer {
     display: block;
   }
   .sf-nav nav {
+    display: none;
+  }
+  .sf-cursor-glow {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-reveal,
+  .sf-btn,
+  .sf-tilt,
+  .template-aurora .sf-bg-layer {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .sf-cursor-glow {
     display: none;
   }
 }

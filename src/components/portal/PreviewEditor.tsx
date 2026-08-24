@@ -18,13 +18,22 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type {
+  FontPair,
   LayoutVariant,
+  MotionLevel,
   SectionKey,
   SiteContentMap,
   SiteRenderModel,
   TemplateId,
+  ThemeSettings,
 } from "@/types/content";
-import { TEMPLATE_IDS } from "@/types/content";
+import {
+  DEFAULT_THEME,
+  FONT_PAIRS,
+  MOTION_LEVELS,
+  TEMPLATE_IDS,
+  TEMPLATE_META,
+} from "@/types/content";
 import { SiteRenderer } from "@/components/site/SiteRenderer";
 import { Button } from "@/components/ui/Button";
 import { ErrorNote } from "@/components/ui/Field";
@@ -55,7 +64,10 @@ export function PreviewEditor({
   isGuest: boolean;
 }) {
   const router = useRouter();
-  const [model, setModel] = useState(initial);
+  const [model, setModel] = useState({
+    ...initial,
+    theme: initial.theme || initial.company.siteTheme || DEFAULT_THEME,
+  });
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [selected, setSelected] = useState<SectionKey>(initial.sectionOrder[0] || "hero");
   const [busy, setBusy] = useState(false);
@@ -275,6 +287,36 @@ export function PreviewEditor({
     });
   }
 
+  async function patchTheme(partial: Partial<ThemeSettings> & { brandColor?: string }) {
+    const nextTheme: ThemeSettings = {
+      ...(model.theme || DEFAULT_THEME),
+      fontPair: (partial.fontPair as FontPair) || model.theme?.fontPair || "auto",
+      motion: (partial.motion as MotionLevel) || model.theme?.motion || "lively",
+      cursorGlow:
+        typeof partial.cursorGlow === "boolean"
+          ? partial.cursorGlow
+          : model.theme?.cursorGlow !== false,
+    };
+    const brandColor = partial.brandColor || model.brandColor;
+    setModel((prev) => ({
+      ...prev,
+      brandColor,
+      theme: nextTheme,
+      company: { ...prev.company, brandColor, siteTheme: nextTheme },
+    }));
+    await fetch("/api/sites", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteId,
+        brandColor,
+        theme: nextTheme,
+      }),
+    });
+  }
+
+  const theme = model.theme || DEFAULT_THEME;
+
   return (
     <div className="grid min-h-[70vh] lg:grid-cols-[360px_1fr]">
       <aside className="flex max-h-screen flex-col border-r border-line bg-white">
@@ -309,11 +351,61 @@ export function PreviewEditor({
             >
               {TEMPLATE_IDS.map((id) => (
                 <option key={id} value={id}>
-                  {id}
+                  {TEMPLATE_META[id].label} — {TEMPLATE_META[id].blurb}
                 </option>
               ))}
             </select>
           </label>
+
+          <div className="mt-3 space-y-2 rounded-2xl border border-line bg-paper/70 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-ink-soft">Customize look</p>
+            <label className="block text-xs">
+              Brand color
+              <input
+                type="color"
+                className="mt-1 h-9 w-full cursor-pointer rounded-lg border border-line bg-white"
+                value={model.brandColor?.startsWith("#") ? model.brandColor : "#1A1714"}
+                onChange={(e) => void patchTheme({ brandColor: e.target.value })}
+              />
+            </label>
+            <label className="block text-xs">
+              Typography
+              <select
+                className="mt-1 w-full rounded-xl border border-line px-2 py-2 text-sm"
+                value={theme.fontPair}
+                onChange={(e) => void patchTheme({ fontPair: e.target.value as FontPair })}
+              >
+                {FONT_PAIRS.map((pair) => (
+                  <option key={pair} value={pair}>
+                    {pair === "auto" ? "Auto (match template)" : pair}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs">
+              Motion
+              <select
+                className="mt-1 w-full rounded-xl border border-line px-2 py-2 text-sm"
+                value={theme.motion}
+                onChange={(e) => void patchTheme({ motion: e.target.value as MotionLevel })}
+              >
+                {MOTION_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {level}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={theme.cursorGlow !== false && theme.motion !== "off"}
+                onChange={(e) => void patchTheme({ cursorGlow: e.target.checked })}
+              />
+              Cursor glow
+            </label>
+          </div>
+
           <div className="mt-3">
             <Button
               variant="ghost"

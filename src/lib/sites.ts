@@ -4,6 +4,8 @@ import { sites, siteContent, tenants } from "./db/schema";
 import {
   companyDataSchema,
   SECTION_KEYS,
+  DEFAULT_THEME,
+  themeSettingsSchema,
   type CompanyData,
   type SectionKey,
   type SiteContentMap,
@@ -67,6 +69,8 @@ export async function loadSiteModel(opts: {
     : emptyCompany({ name: row.name, palette: row.palette ?? [] });
 
   const plan = getPlan(tenant?.plan);
+  const themeParsed = themeSettingsSchema.safeParse(company.siteTheme ?? {});
+  const theme = themeParsed.success ? themeParsed.data : DEFAULT_THEME;
 
   return {
     siteId: row.id,
@@ -80,6 +84,7 @@ export async function loadSiteModel(opts: {
     brandColor: company.brandColor,
     palette: row.palette?.length ? row.palette : company.palette,
     hideBadge: plan.hideBadge,
+    theme,
     company,
     content,
     sectionOrder: sectionOrder.length ? sectionOrder : [...SECTION_KEYS],

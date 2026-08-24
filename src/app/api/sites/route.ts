@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { siteContent, sites } from "@/lib/db/schema";
-import { companyDataSchema, type SectionKey, type TemplateId } from "@/types/content";
+import { companyDataSchema, themeSettingsSchema, type SectionKey, type TemplateId } from "@/types/content";
 
 export async function PATCH(request: Request) {
   const session = await ensureGuestSession();
@@ -11,6 +11,8 @@ export async function PATCH(request: Request) {
     siteId?: string;
     company?: unknown;
     templateId?: TemplateId;
+    brandColor?: string;
+    theme?: unknown;
     sectionOrder?: SectionKey[];
     section?: { key: SectionKey; content: Record<string, unknown> };
     subdomain?: string;
@@ -52,6 +54,31 @@ export async function PATCH(request: Request) {
       .set({ templateId: body.templateId, updatedAt: new Date() })
       .where(eq(sites.id, site.id));
   }
+
+  if (body.brandColor || body.theme) {
+    const current = companyDataSchema.safeParse(site.companyData ?? {});
+    const base = current.success ? current.data : companyDataSchema.parse({ name: site.name });
+    const nextTheme = body.theme
+      ? themeSettingsSchema.parse({ ...(base.siteTheme || {}), ...(body.theme as object) })
+      : base.siteTheme;
+    const company = companyDataSchema.parse({
+      ...base,
+      brandColor: body.brandColor || base.brandColor,
+      siteTheme: nextTheme,
+      palette: body.brandColor
+        ? [body.brandColor, ...(base.palette || []).filter((c) => c !== body.brandColor)].slice(0, 5)
+        : base.palette,
+    });
+    await db
+      .update(sites)
+      .set({
+        companyData: company,
+        palette: company.palette,
+        updatedAt: new Date(),
+      })
+      .where(eq(sites.id, site.id));
+  }
+
   if (body.section) {
     await db
       .update(siteContent)

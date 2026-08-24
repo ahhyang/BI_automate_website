@@ -12,6 +12,10 @@ const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: "modern", name: "Modern", note: "Clean type, lots of air" },
   { id: "bold", name: "Bold", note: "Brand color as the page" },
   { id: "editorial", name: "Editorial", note: "Magazine, warm paper" },
+  { id: "glass", name: "Glass", note: "Glassmorphism + glow" },
+  { id: "aurora", name: "Aurora", note: "Animated gradient sky" },
+  { id: "noir", name: "Noir", note: "Dark, sharp contrast" },
+  { id: "meadow", name: "Meadow", note: "Fresh green calm" },
 ];
 
 const DEFAULT_STEPS = [
