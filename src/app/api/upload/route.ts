@@ -12,7 +12,10 @@ import type { MediaItem } from "@/types/content";
 import { linksInputSchema } from "@/types/content";
 
 const MAX_MEDIA = 24;
-const MAX_BYTES = 40 * 1024 * 1024;
+const MAX_BYTES = 4.5 * 1024 * 1024; // align with Vercel request body limits
+const EXTRACT_TIMEOUT_MS = 12_000;
+
+export const maxDuration = 60;
 
 function isTextDoc(file: File) {
   const n = file.name.toLowerCase();
@@ -24,6 +27,16 @@ function isTextDoc(file: File) {
     n.endsWith(".docx") ||
     n.endsWith(".txt")
   );
+}
+
+async function extractWithTimeout(file: File) {
+  const { extractDocumentText } = await import("@/lib/parsing/extract-text");
+  return await Promise.race([
+    extractDocumentText(file),
+    new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error("Document read timed out")), EXTRACT_TIMEOUT_MS),
+    ),
+  ]);
 }
 
 export async function POST(request: Request) {
@@ -83,13 +96,20 @@ export async function POST(request: Request) {
 
   if (logo instanceof File && logo.size > 0) {
     if (logo.size > MAX_BYTES) {
-      return NextResponse.json({ error: "Logo is too large (max 40MB).", siteId }, { status: 413 });
+      return NextResponse.json(
+        { error: "Logo is too large (max 4.5 MB).", siteId },
+        { status: 413 },
+      );
     }
     const stored = await storeFile(logo, "logos");
     logoUrl = stored.url;
-    const colors = await colorsFromLogo(Buffer.from(await logo.arrayBuffer()));
-    brandColor = colors.brandColor;
-    palette = colors.palette;
+    try {
+      const colors = await colorsFromLogo(Buffer.from(await logo.arrayBuffer()));
+      brandColor = colors.brandColor;
+      palette = colors.palette;
+    } catch {
+      /* keep defaults */
+    }
     await db.insert(uploads).values({
       tenantId: session.tenantId,
       siteId,
@@ -103,31 +123,32 @@ export async function POST(request: Request) {
 
   let parsedText = pasted.trim();
   const media: MediaItem[] = [];
+  const warnings: string[] = [];
 
   for (const doc of docs) {
     if (doc.size > MAX_BYTES) {
-      return NextResponse.json({ error: `${doc.name} is too large (max 40MB).`, siteId }, { status: 413 });
+      return NextResponse.json(
+        {
+          error: `${doc.name} is too large (${(doc.size / (1024 * 1024)).toFixed(1)} MB). Max is 4.5 MB — compress the PDF or paste the text.`,
+          siteId,
+        },
+        { status: 413 },
+      );
     }
     const stored = await storeFile(doc, "docs");
     let text = "";
     if (isTextDoc(doc)) {
       try {
-        const { extractDocumentText } = await import("@/lib/parsing/extract-text");
-        text = await extractDocumentText(doc);
+        text = await extractWithTimeout(doc);
+        if (text.length > 40_000) text = text.slice(0, 40_000);
         if (!parsedText) parsedText = text;
         else parsedText += `\n\n${text}`;
-      } catch (error) {
-        if (!parsedText && docs.length === 1 && mediaFiles.length === 0 && !pasted.trim()) {
-          return NextResponse.json(
-            {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "We couldn't read that file. Try pasting text, or answer the quick questions.",
-              siteId,
-            },
-            { status: 422 },
-          );
+      } catch {
+        warnings.push(
+          `Could not fully read “${doc.name}” — we’ll still attach it and use your links / filename.`,
+        );
+        if (!parsedText) {
+          parsedText = `Company document uploaded: ${doc.name}. Build a professional site from the filename and any contact links provided.`;
         }
       }
     }
@@ -152,7 +173,13 @@ export async function POST(request: Request) {
 
   for (const file of mediaFiles) {
     if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: `${file.name} is too large (max 40MB).`, siteId }, { status: 413 });
+      return NextResponse.json(
+        {
+          error: `${file.name} is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max is 4.5 MB.`,
+          siteId,
+        },
+        { status: 413 },
+      );
     }
     const kind = mediaKindFromFile(file);
     if (!kind) continue;
@@ -187,5 +214,6 @@ export async function POST(request: Request) {
     media,
     links,
     hasDocument: Boolean(parsedText),
+    warning: warnings[0],
   });
 }
