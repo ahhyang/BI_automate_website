@@ -10,30 +10,52 @@ import {
   SECTION_KEYS,
 } from "@/types/content";
 
-const MODEL = "claude-sonnet-4-5";
+/** OpenRouter model id, or Anthropic native id when using ANTHROPIC_API_KEY only. */
+const OPENROUTER_MODEL =
+  process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
-function client() {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
-  return new Anthropic({ apiKey: key });
+function client(): { anthropic: Anthropic; model: string } | null {
+  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (openRouterKey) {
+    return {
+      anthropic: new Anthropic({
+        apiKey: openRouterKey,
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://siteform-omega.vercel.app",
+          "X-Title": process.env.NEXT_PUBLIC_APP_NAME || "Siteform",
+        },
+      }),
+      model: OPENROUTER_MODEL,
+    };
+  }
+  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (anthropicKey) {
+    return {
+      anthropic: new Anthropic({ apiKey: anthropicKey }),
+      model: ANTHROPIC_MODEL,
+    };
+  }
+  return null;
 }
 
 async function completeJson(system: string, user: string) {
-  const anthropic = client();
-  if (!anthropic) return null;
-  const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 4096,
-    system,
-    messages: [{ role: "user", content: user }],
-  });
-  const text = message.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
+  const wired = client();
+  if (!wired) return null;
   try {
+    const message = await wired.anthropic.messages.create({
+      model: wired.model,
+      max_tokens: 4096,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    const text = message.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
     return JSON.parse(match[0]) as unknown;
   } catch {
     return null;
