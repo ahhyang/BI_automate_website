@@ -1,4 +1,5 @@
 import { DEMO_SUBDOMAINS } from "./host";
+import { emptyCompany } from "./sites";
 import type { SiteRenderModel } from "@/types/content";
 
 export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderModel> = {
@@ -11,7 +12,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#3D2B1F",
     palette: ["#3D2B1F", "#C4A574", "#F7F3EC"],
     hideBadge: true,
-    company: {
+    company: emptyCompany({
       name: "Hale & Whitmore",
       tagline: "Counsel for closely held companies.",
       industry: "Law",
@@ -29,6 +30,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
         address: "Two Embarcadero Center, San Francisco",
         website: "",
         whatsapp: "",
+        hours: "",
       },
       social: {
         linkedin: "",
@@ -45,7 +47,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
       palette: ["#3D2B1F", "#C4A574"],
       tone: "formal",
       uncertainFields: [],
-    },
+    }),
     content: {
       hero: {
         headline: "Counsel for closely held companies.",
@@ -102,7 +104,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#8B3A2A",
     palette: ["#8B3A2A", "#E8C9A8", "#FBF6EE"],
     hideBadge: true,
-    company: {
+    company: emptyCompany({
       name: "Oak & Ember Bakery",
       tagline: "Bread, pastry, and a table by the window.",
       industry: "Bakery",
@@ -120,6 +122,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
         address: "412 Division St, Portland",
         website: "",
         whatsapp: "",
+        hours: "",
       },
       social: {
         linkedin: "",
@@ -136,7 +139,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
       palette: ["#8B3A2A"],
       tone: "friendly",
       uncertainFields: [],
-    },
+    }),
     content: {
       hero: {
         headline: "Bread, pastry, and a table by the window.",
@@ -192,7 +195,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
     brandColor: "#0F4C4C",
     palette: ["#0F4C4C", "#1FA6A6", "#F4F7F6"],
     hideBadge: true,
-    company: {
+    company: emptyCompany({
       name: "Northline Analytics",
       tagline: "Operational reporting that operators will actually open.",
       industry: "Analytics",
@@ -210,6 +213,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
         address: "Remote-first, New York hours",
         website: "",
         whatsapp: "",
+        hours: "",
       },
       social: {
         linkedin: "northline-analytics",
@@ -226,7 +230,7 @@ export const DEMO_SITES: Record<(typeof DEMO_SUBDOMAINS)[number], SiteRenderMode
       palette: ["#0F4C4C"],
       tone: "technical",
       uncertainFields: [],
-    },
+    }),
     content: {
       hero: {
         headline: "Operational reporting that operators will actually open.",

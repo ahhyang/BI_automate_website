@@ -161,7 +161,9 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
     return (
       <section className="sf-section" id="about">
         <h2>{data.title}</h2>
-        <p className="sf-body">{data.body}</p>
+        <div className="sf-body" style={{ whiteSpace: "pre-wrap" }}>
+          {data.body}
+        </div>
       </section>
     );
   }
@@ -291,6 +293,9 @@ function Section({ sectionKey, model }: { sectionKey: SectionKey; model: SiteRen
             </li>
           ) : null}
           {address ? <li>{address}</li> : null}
+          {data.hours || company.contact.hours ? (
+            <li>Hours: {data.hours || company.contact.hours}</li>
+          ) : null}
         </ul>
         {socialEntries.length ? (
           <div className="sf-social">

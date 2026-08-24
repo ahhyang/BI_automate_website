@@ -6,6 +6,24 @@ export type Tone = z.infer<typeof toneSchema>;
 export const offeringSchema = z.object({
   title: z.string().min(1),
   description: z.string().default(""),
+  price: z.string().optional(),
+});
+
+/** Site section list items (no price field required in the renderer). */
+export const contentOfferingSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().default(""),
+});
+
+export const faqItemSchema = z.object({
+  question: z.string().min(1),
+  answer: z.string().default(""),
+});
+
+export const teamMemberSchema = z.object({
+  name: z.string().min(1),
+  role: z.string().default(""),
+  bio: z.string().default(""),
 });
 
 export const mediaItemSchema = z.object({
@@ -45,6 +63,7 @@ export const companyDataSchema = z.object({
     address: z.string().default(""),
     website: z.string().default(""),
     whatsapp: z.string().default(""),
+    hours: z.string().optional(),
   }),
   social: socialLinksSchema.default({
     linkedin: "",
@@ -61,6 +80,22 @@ export const companyDataSchema = z.object({
   palette: z.array(z.string()).default([]),
   tone: toneSchema.default("friendly"),
   uncertainFields: z.array(z.string()).default([]),
+  /** Full document text used to ground generation (truncated for storage). */
+  sourceText: z.string().default(""),
+  /** Bullet facts / differentiators taken from the document. */
+  highlights: z.array(z.string()).default([]),
+  faqs: z.array(faqItemSchema).default([]),
+  team: z.array(teamMemberSchema).default([]),
+  /** Real quotes from the document when present. */
+  testimonials: z
+    .array(
+      z.object({
+        quote: z.string(),
+        author: z.string().default(""),
+        role: z.string().default(""),
+      }),
+    )
+    .default([]),
 });
 
 export type CompanyData = z.infer<typeof companyDataSchema>;
@@ -93,7 +128,7 @@ export const aboutContentSchema = z.object({
 
 export const listSectionSchema = z.object({
   title: z.string(),
-  items: z.array(offeringSchema).default([]),
+  items: z.array(contentOfferingSchema).default([]),
 });
 
 export const galleryContentSchema = z.object({
@@ -127,6 +162,7 @@ export const contactContentSchema = z.object({
   phone: z.string().default(""),
   address: z.string().default(""),
   whatsapp: z.string().default(""),
+  hours: z.string().optional(),
 });
 
 export const footerContentSchema = z.object({

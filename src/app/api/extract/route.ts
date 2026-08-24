@@ -15,6 +15,9 @@ import {
 import { uniqueSubdomain } from "@/lib/sites";
 import { slugify } from "@/lib/slug";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 async function ownedSite(siteId: string, tenantId: string) {
   const db = getDb();
   const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
@@ -35,6 +38,7 @@ function mergeLinksAndMedia(
       phone: links.phone || company.contact.phone,
       website: links.website || company.contact.website,
       whatsapp: links.whatsapp || company.contact.whatsapp,
+      hours: company.contact.hours || "",
     },
     social: {
       ...company.social,
@@ -107,6 +111,7 @@ export async function POST(request: Request) {
           address: "",
           website: links.website || "",
           whatsapp: links.whatsapp || "",
+          hours: "",
         },
         social: {
           linkedin: links.linkedin || "",
@@ -123,6 +128,11 @@ export async function POST(request: Request) {
         palette: [brandColor],
         tone: "friendly",
         uncertainFields: ["name", "description"],
+        sourceText: "",
+        highlights: [],
+        faqs: [],
+        team: [],
+        testimonials: [],
       });
     } else {
       return NextResponse.json(

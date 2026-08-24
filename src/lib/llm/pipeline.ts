@@ -88,11 +88,25 @@ const CRITICAL_UNCERTAIN = new Set([
   "contact.phone",
 ]);
 
+const SOURCE_TEXT_LIMIT = 60_000;
+
+function withSourceText(company: CompanyData, text: string): CompanyData {
+  return companyDataSchema.parse({
+    ...company,
+    sourceText: (text || company.sourceText || "").slice(0, SOURCE_TEXT_LIMIT),
+  });
+}
+
 /** Pause Create for a quick review when extraction is thin or guessed. */
 export function needsExtractReview(company: CompanyData): boolean {
   if (!company.name?.trim() || /^your company$/i.test(company.name.trim())) return true;
+  const offerings = company.services.length + company.products.length;
+  // Document-rich extract — trust it and skip the gate
+  if ((company.sourceText?.length || 0) > 400 && offerings >= 2 && company.description.length >= 40) {
+    return false;
+  }
   if ((company.description || "").trim().length < 40) return true;
-  if (!company.services.length && !company.products.length) return true;
+  if (!offerings) return true;
   const criticalHits = company.uncertainFields.filter((f) => CRITICAL_UNCERTAIN.has(f));
   return criticalHits.length >= 2;
 }
@@ -111,34 +125,41 @@ export function heuristicExtract(text: string, brandColor: string): CompanyData 
   const serviceMatches = text
     .split(/\n+/)
     .map((line) => line.replace(/^[-*•\d.)\s]+/, "").trim())
-    .filter((line) => line.length > 8 && line.length < 80)
-    .slice(0, 4)
-    .map((title) => ({ title, description: `Learn more about ${title.toLowerCase()}.` }));
+    .filter((line) => line.length > 8 && line.length < 120)
+    .slice(0, 16)
+    .map((title) => ({ title, description: "", price: "" }));
 
-  return companyDataSchema.parse({
-    name,
-    tagline,
-    industry: "",
-    description: text.slice(0, 600),
-    services: serviceMatches.length ? serviceMatches : [{ title: "Consulting", description: "" }],
-    products: [],
-    contact: { email, phone, address: "", website: "", whatsapp: "" },
-    social: {
-      linkedin: "",
-      twitter: "",
-      facebook: "",
-      instagram: "",
-      youtube: "",
-      tiktok: "",
-      telegram: "",
-      whatsapp: "",
-    },
-    media: [],
-    brandColor,
-    palette: [brandColor],
-    tone: "friendly",
-    uncertainFields: [...uncertain, "industry", "social"],
-  });
+  return withSourceText(
+    companyDataSchema.parse({
+      name,
+      tagline,
+      industry: "",
+      description: text.slice(0, 1200),
+      services: serviceMatches.length ? serviceMatches : [{ title: "Consulting", description: "", price: "" }],
+      products: [],
+      contact: { email, phone, address: "", website: "", whatsapp: "", hours: "" },
+      social: {
+        linkedin: "",
+        twitter: "",
+        facebook: "",
+        instagram: "",
+        youtube: "",
+        tiktok: "",
+        telegram: "",
+        whatsapp: "",
+      },
+      media: [],
+      brandColor,
+      palette: [brandColor],
+      tone: "friendly",
+      uncertainFields: [...uncertain, "industry", "social"],
+      highlights: lines.slice(2, 8),
+      faqs: [],
+      team: [],
+      testimonials: [],
+    }),
+    text,
+  );
 }
 
 export function extractFromQuestions(answers: FiveQuestions, brandColor: string): CompanyData {
@@ -146,41 +167,50 @@ export function extractFromQuestions(answers: FiveQuestions, brandColor: string)
     .split(/,|\n|;/)
     .map((item) => item.trim())
     .filter(Boolean)
-    .map((title) => ({ title, description: "" }));
+    .map((title) => ({ title, description: "", price: "" }));
 
   const email = guessEmail(answers.contact);
   const phone = guessPhone(answers.contact);
+  const source = `Company: ${answers.companyName}\nTagline: ${answers.oneLiner}\nAudience: ${answers.audience}\nOfferings: ${answers.offerings}\nContact: ${answers.contact}`;
 
-  return companyDataSchema.parse({
-    name: answers.companyName,
-    tagline: answers.oneLiner,
-    industry: "",
-    description: `${answers.oneLiner} We work with ${answers.audience}.`,
-    services: offerings,
-    products: [],
-    contact: {
-      email,
-      phone,
-      address: email || phone ? "" : answers.contact,
-      website: "",
-      whatsapp: "",
-    },
-    social: {
-      linkedin: "",
-      twitter: "",
-      facebook: "",
-      instagram: "",
-      youtube: "",
-      tiktok: "",
-      telegram: "",
-      whatsapp: "",
-    },
-    media: [],
-    brandColor,
-    palette: [brandColor],
-    tone: "friendly",
-    uncertainFields: ["industry", "social", "brandColor"],
-  });
+  return withSourceText(
+    companyDataSchema.parse({
+      name: answers.companyName,
+      tagline: answers.oneLiner,
+      industry: "",
+      description: `${answers.oneLiner} We work with ${answers.audience}.`,
+      services: offerings,
+      products: [],
+      contact: {
+        email,
+        phone,
+        address: email || phone ? "" : answers.contact,
+        website: "",
+        whatsapp: "",
+        hours: "",
+      },
+      social: {
+        linkedin: "",
+        twitter: "",
+        facebook: "",
+        instagram: "",
+        youtube: "",
+        tiktok: "",
+        telegram: "",
+        whatsapp: "",
+      },
+      media: [],
+      brandColor,
+      palette: [brandColor],
+      tone: "friendly",
+      uncertainFields: ["industry", "social", "brandColor"],
+      highlights: [answers.oneLiner, `Audience: ${answers.audience}`].filter(Boolean),
+      faqs: [],
+      team: [],
+      testimonials: [],
+    }),
+    source,
+  );
 }
 
 export async function extractCompanyData(input: {
@@ -189,30 +219,36 @@ export async function extractCompanyData(input: {
 }): Promise<CompanyData> {
   const fallback = heuristicExtract(input.text, input.brandColor);
   const raw = await completeJson(
-    `You are a senior brand researcher extracting structured company data from messy PDFs, brochures, and menus for a website generator (like v0).
+    `You are a meticulous document-to-website extractor. Your job is to pull EVERY usable fact from the PDF/brochure/menu into structured JSON so a website can be built from the document alone.
 
 Return ONLY valid JSON matching this shape:
 {
   "name": string,
-  "tagline": string (one sharp marketing line, not a paragraph),
+  "tagline": string (sharp homepage line from their real positioning),
   "industry": string,
-  "description": string (2-4 concrete sentences; who they are, who they serve, what makes them distinct),
-  "services": [{"title": string, "description": string (benefit-focused, 1 sentence)}],
-  "products": [{"title": string, "description": string}],
-  "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string},
+  "description": string (3-6 sentences grounded in the document — who they are, what they do, who they serve),
+  "services": [{"title": string, "description": string, "price": string}],
+  "products": [{"title": string, "description": string, "price": string}],
+  "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string, "hours": string},
   "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string, "youtube": string, "tiktok": string, "telegram": string, "whatsapp": string},
   "tone": "formal" | "friendly" | "technical",
-  "uncertainFields": string[] (dot-paths for anything guessed or missing)
+  "uncertainFields": string[],
+  "highlights": string[] (important facts, differentiators, certifications, stats — verbatim when possible),
+  "faqs": [{"question": string, "answer": string}],
+  "team": [{"name": string, "role": string, "bio": string}],
+  "testimonials": [{"quote": string, "author": string, "role": string}]
 }
 
 Hard rules:
-- Never invent phone numbers, emails, addresses, or social handles. Empty string + list in uncertainFields.
-- Prefer real offerings from the document over generic filler.
-- Infer industry and tone from language; keep services/products grounded in the source.
-- Tagline must sound like a homepage hero, not a legal description.
-- If the document is thin, still extract the best name + tagline you can and mark uncertainFields honestly.`,
-    `Brand color sampled from logo: ${input.brandColor}\n\nDocument:\n${input.text.slice(0, 24000)}`,
-    4096,
+- Extract ALL services, products, menu items, packages, treatments, or offerings listed in the document (up to 24 each). Include prices when shown.
+- Put opening hours / operating hours into contact.hours exactly as written when present.
+- Pull address, phone, email, WhatsApp, website, and socials only when present — never invent.
+- If the doc has FAQs, team bios, or client quotes, extract them; otherwise use empty arrays.
+- Prefer the document's own wording over marketing fluff you invent.
+- highlights should capture concrete facts (years of experience, locations, specialties, guarantees).
+- If something is missing, leave it empty and list the field in uncertainFields.`,
+    `Brand color sampled from logo: ${input.brandColor}\n\n--- DOCUMENT START ---\n${input.text.slice(0, SOURCE_TEXT_LIMIT)}\n--- DOCUMENT END ---`,
+    8192,
   );
 
   if (!raw) return fallback;
@@ -221,18 +257,74 @@ Hard rules:
     brandColor: input.brandColor,
     palette: [input.brandColor],
   });
-  return parsed.success ? parsed.data : fallback;
+  if (!parsed.success) return fallback;
+  return withSourceText(parsed.data, input.text);
+}
+
+function formatOfferingLine(item: { title: string; description?: string; price?: string }) {
+  const bits = [item.title];
+  if (item.price?.trim()) bits.push(`(${item.price.trim()})`);
+  if (item.description?.trim()) bits.push(`— ${item.description.trim()}`);
+  return bits.join(" ");
+}
+
+function aboutBodyFromCompany(company: CompanyData): string {
+  const parts: string[] = [];
+  if (company.description.trim()) parts.push(company.description.trim());
+  if (company.highlights.length) {
+    parts.push(company.highlights.map((h) => `• ${h}`).join("\n"));
+  }
+  if (company.team.length) {
+    parts.push(
+      "Team\n" +
+        company.team
+          .map((m) => `• ${m.name}${m.role ? ` — ${m.role}` : ""}${m.bio ? `: ${m.bio}` : ""}`)
+          .join("\n"),
+    );
+  }
+  if (company.faqs.length) {
+    parts.push(
+      "FAQ\n" + company.faqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join("\n\n"),
+    );
+  }
+  return parts.join("\n\n").slice(0, 8000);
 }
 
 function templateCopy(company: CompanyData): SiteContentMap {
   const offerings = company.services.length ? company.services : company.products;
   const primary = offerings[0];
   const audienceHint = company.industry ? ` for ${company.industry.toLowerCase()} clients` : "";
+  const serviceItems = company.services.length
+    ? company.services.map((s) => ({
+        title: s.price ? `${s.title} — ${s.price}` : s.title,
+        description: s.description,
+      }))
+    : [{ title: "Consultation", description: "A clear plan tailored to your goals." }];
+  const productItems = company.products.map((s) => ({
+    title: s.price ? `${s.title} — ${s.price}` : s.title,
+    description: s.description,
+  }));
+
+  const testimonialItems = company.testimonials.length
+    ? company.testimonials
+    : [
+        {
+          quote: `${company.name} made everything straightforward — grounded in what they actually offer.`,
+          author: "A recent client",
+          role: company.industry || "Customer",
+        },
+      ];
+
+  const contactBodyParts = [
+    "Reach out — we typically reply within one business day.",
+    company.contact.hours ? `Hours: ${company.contact.hours}` : "",
+  ].filter(Boolean);
+
   return {
     hero: {
       headline: company.tagline || `Welcome to ${company.name}`,
       subheadline:
-        company.description ||
+        company.description.slice(0, 320) ||
         (primary
           ? `${company.name} delivers ${primary.title.toLowerCase()}${audienceHint}.`
           : `${company.name} — clear, professional, ready to grow.`),
@@ -241,29 +333,19 @@ function templateCopy(company: CompanyData): SiteContentMap {
     },
     about: {
       title: `About ${company.name}`,
-      body:
-        company.description ||
-        `${company.name} helps people get results without the noise. Tell us what you need — we’ll take it from there.`,
+      body: aboutBodyFromCompany(company),
     },
     services: {
-      title: "What we offer",
-      items: company.services.length
-        ? company.services
-        : [{ title: "Consultation", description: "A clear plan tailored to your goals." }],
+      title: company.services.length > 8 ? "Full menu of services" : "What we offer",
+      items: serviceItems,
     },
     products: {
       title: "Products",
-      items: company.products,
+      items: productItems,
     },
     testimonials: {
-      title: "Trusted by clients",
-      items: [
-        {
-          quote: `${company.name} made everything straightforward — the site feels like a real brand, not a placeholder.`,
-          author: "A recent client",
-          role: company.industry || "Customer",
-        },
-      ],
+      title: company.testimonials.length ? "What clients say" : "Trusted by clients",
+      items: testimonialItems,
     },
     cta: {
       headline: `Ready to work with ${company.name}?`,
@@ -272,11 +354,12 @@ function templateCopy(company: CompanyData): SiteContentMap {
     },
     contact: {
       title: "Contact",
-      body: "Reach out — we typically reply within one business day.",
+      body: contactBodyParts.join(" "),
       email: company.contact.email,
       phone: company.contact.phone,
       address: company.contact.address,
       whatsapp: company.contact.whatsapp,
+      hours: company.contact.hours,
     },
     gallery: {
       title: company.media.some((m) => m.kind === "video") ? "Photos & videos" : "Gallery",
@@ -343,9 +426,11 @@ export async function generateSiteContent(input: {
     ? `Media available: ${input.company.media.map((m) => m.kind).join(", ")} (${input.company.media.length} files). Include gallery.`
     : "No media files — omit gallery from sectionOrder.";
 
+  const { sourceText, ...companyWithoutSource } = input.company;
+  const documentBlock = (sourceText || "").slice(0, 40_000);
+
   const raw = await completeJson(
-    `You are an elite website copywriter and information architect (v0 / Linear / Stripe quality).
-Build a small-business marketing site that feels intentional — not template filler.
+    `You are an elite website builder. The user uploaded a real company document. Your job is to put the DOCUMENT'S DATA onto the website — not invent a generic brochure.
 
 Return ONLY JSON:
 {
@@ -360,21 +445,29 @@ Return ONLY JSON:
     "gallery": {"title": string, "body": string},
     "testimonials": {"title": string, "items": [{"quote": string, "author": string, "role": string}]},
     "cta": {"headline": string, "body": string, "buttonLabel": string},
-    "contact": {"title": string, "body": string, "email": string, "phone": string, "address": string, "whatsapp": string},
+    "contact": {"title": string, "body": string, "email": string, "phone": string, "address": string, "whatsapp": string, "hours": string},
     "footer": {"blurb": string}
   }
 }
 
-Quality bar:
-- Hero headline: short, specific, memorable (not "Welcome to …" unless unavoidable).
-- Subheadline: concrete benefit + audience; 1–2 sentences max.
-- Services/products: benefit-led descriptions; keep real titles from company data.
-- Testimonials: plausible but generic if no real quotes — never invent company names or fake contact info.
-- Contact fields: copy ONLY from company.contact; never invent.
+Document-grounding rules (critical):
+- Use names, offerings, prices, hours, addresses, phone, email, WhatsApp, team, FAQs, and quotes FROM THE DOCUMENT / structured company JSON.
+- services.items and products.items MUST include every offering from the structured data (titles + descriptions + prices when available). Do not drop items to "look cleaner".
+- about.body should weave description + highlights + team + FAQs from the document (use line breaks). Keep it factual.
+- contact.* must match document facts only. Put opening hours in contact.hours and mention them in contact.body.
+- testimonials: use real quotes from the document when present; otherwise one short generic line (no fake names of real people).
+- Never invent phone numbers, emails, addresses, prices, or clinic/company facts not in the source.
+- Hero can polish wording but must reflect the real tagline/positioning.
 - Tone must match company.tone. Template hint: ${input.templateId}.
-- ${mediaNote}
-- Prefer fewer strong sections over many weak ones. Max 9 sections.`,
-    JSON.stringify(input.company),
+- ${mediaNote}`,
+    JSON.stringify({
+      company: companyWithoutSource,
+      offeringChecklist: {
+        services: input.company.services.map(formatOfferingLine),
+        products: input.company.products.map(formatOfferingLine),
+      },
+      sourceDocument: documentBlock || "(no raw document text — use structured company fields only)",
+    }),
     8192,
   );
 
@@ -399,8 +492,48 @@ Quality bar:
       ? data.sectionOrder.filter((k) => SECTION_KEYS.includes(k))
       : sectionOrder;
 
+  let content = mergeValidatedContent(base, data.content);
+
+  // Never let the model silently drop offerings extracted from the document
+  if (input.company.services.length) {
+    const aiItems = content.services?.items || [];
+    if (aiItems.length < input.company.services.length) {
+      content = {
+        ...content,
+        services: {
+          title: content.services?.title || base.services.title,
+          items: base.services.items,
+        },
+      };
+    }
+  }
+  if (input.company.products.length) {
+    const aiItems = content.products?.items || [];
+    if (aiItems.length < input.company.products.length) {
+      content = {
+        ...content,
+        products: {
+          title: content.products?.title || base.products.title,
+          items: base.products.items,
+        },
+      };
+    }
+  }
+  // Preserve document contact facts if the model emptied them
+  content = {
+    ...content,
+    contact: {
+      ...content.contact,
+      email: content.contact.email || input.company.contact.email,
+      phone: content.contact.phone || input.company.contact.phone,
+      address: content.contact.address || input.company.contact.address,
+      whatsapp: content.contact.whatsapp || input.company.contact.whatsapp,
+      hours: content.contact.hours || input.company.contact.hours,
+    },
+  };
+
   return {
-    content: mergeValidatedContent(base, data.content),
+    content,
     layoutVariant: data.layoutVariant || "split",
     palette: data.palette?.length ? data.palette : input.company.palette,
     sectionOrder: order,

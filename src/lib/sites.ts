@@ -112,7 +112,7 @@ export function emptyCompany(partial?: Partial<CompanyData>): CompanyData {
     description: "",
     services: [],
     products: [],
-    contact: { email: "", phone: "", address: "", website: "", whatsapp: "" },
+    contact: { email: "", phone: "", address: "", website: "", whatsapp: "", hours: "" },
     social: {
       linkedin: "",
       twitter: "",
@@ -128,6 +128,11 @@ export function emptyCompany(partial?: Partial<CompanyData>): CompanyData {
     palette: [],
     tone: "friendly",
     uncertainFields: [],
+    sourceText: "",
+    highlights: [],
+    faqs: [],
+    team: [],
+    testimonials: [],
     ...partial,
   };
 }

@@ -13,7 +13,7 @@ import { linksInputSchema } from "@/types/content";
 
 const MAX_MEDIA = 24;
 const MAX_BYTES = 4.5 * 1024 * 1024;
-const EXTRACT_TIMEOUT_MS = 10_000;
+const EXTRACT_TIMEOUT_MS = 45_000;
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
       if (isTextDoc(doc)) {
         try {
           text = await extractWithTimeout(doc);
-          if (text.length > 40_000) text = text.slice(0, 40_000);
+          if (text.length > 80_000) text = text.slice(0, 80_000);
           if (!parsedText) parsedText = text;
           else parsedText += `\n\n${text}`;
         } catch {

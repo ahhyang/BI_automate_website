@@ -214,6 +214,7 @@ export function SectionFields({
       phone: "",
       address: "",
       whatsapp: "",
+      hours: "",
     };
     return (
       <div className="space-y-3">
@@ -227,6 +228,7 @@ export function SectionFields({
           onChange={(whatsapp) => onChange({ ...data, whatsapp })}
         />
         <TextAreaField label="Address" value={data.address} onChange={(address) => onChange({ ...data, address })} />
+        <TextField label="Hours" value={data.hours || ""} onChange={(hours) => onChange({ ...data, hours })} />
       </div>
     );
   }
