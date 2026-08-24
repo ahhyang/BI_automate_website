@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
   companyDataSchema,
+  sectionSchemas,
   type CompanyData,
   type FiveQuestions,
   type SiteContentMap,
@@ -40,13 +41,13 @@ function client(): { anthropic: Anthropic; model: string } | null {
   return null;
 }
 
-async function completeJson(system: string, user: string) {
+async function completeJson(system: string, user: string, maxTokens = 4096) {
   const wired = client();
   if (!wired) return null;
   try {
     const message = await wired.anthropic.messages.create({
       model: wired.model,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }],
     });
@@ -76,6 +77,24 @@ function firstLines(text: string, n = 8) {
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, n);
+}
+
+const CRITICAL_UNCERTAIN = new Set([
+  "name",
+  "description",
+  "tagline",
+  "services",
+  "contact.email",
+  "contact.phone",
+]);
+
+/** Pause Create for a quick review when extraction is thin or guessed. */
+export function needsExtractReview(company: CompanyData): boolean {
+  if (!company.name?.trim() || /^your company$/i.test(company.name.trim())) return true;
+  if ((company.description || "").trim().length < 40) return true;
+  if (!company.services.length && !company.products.length) return true;
+  const criticalHits = company.uncertainFields.filter((f) => CRITICAL_UNCERTAIN.has(f));
+  return criticalHits.length >= 2;
 }
 
 export function heuristicExtract(text: string, brandColor: string): CompanyData {
@@ -170,21 +189,30 @@ export async function extractCompanyData(input: {
 }): Promise<CompanyData> {
   const fallback = heuristicExtract(input.text, input.brandColor);
   const raw = await completeJson(
-    `You extract structured company data from messy documents. Return ONLY valid JSON matching this shape:
+    `You are a senior brand researcher extracting structured company data from messy PDFs, brochures, and menus for a website generator (like v0).
+
+Return ONLY valid JSON matching this shape:
 {
   "name": string,
-  "tagline": string,
+  "tagline": string (one sharp marketing line, not a paragraph),
   "industry": string,
-  "description": string (1-3 sentences),
-  "services": [{"title": string, "description": string}],
+  "description": string (2-4 concrete sentences; who they are, who they serve, what makes them distinct),
+  "services": [{"title": string, "description": string (benefit-focused, 1 sentence)}],
   "products": [{"title": string, "description": string}],
   "contact": {"email": string, "phone": string, "address": string, "website": string, "whatsapp": string},
   "social": {"linkedin": string, "twitter": string, "facebook": string, "instagram": string, "youtube": string, "tiktok": string, "telegram": string, "whatsapp": string},
   "tone": "formal" | "friendly" | "technical",
-  "uncertainFields": string[] (dot-paths for anything you guessed or could not find)
+  "uncertainFields": string[] (dot-paths for anything guessed or missing)
 }
-Do not invent phone numbers, emails, or addresses. Leave them empty and list them in uncertainFields. Keep services/products to what the document actually mentions.`,
-    `Brand color sampled from logo: ${input.brandColor}\n\nDocument:\n${input.text.slice(0, 20000)}`,
+
+Hard rules:
+- Never invent phone numbers, emails, addresses, or social handles. Empty string + list in uncertainFields.
+- Prefer real offerings from the document over generic filler.
+- Infer industry and tone from language; keep services/products grounded in the source.
+- Tagline must sound like a homepage hero, not a legal description.
+- If the document is thin, still extract the best name + tagline you can and mark uncertainFields honestly.`,
+    `Brand color sampled from logo: ${input.brandColor}\n\nDocument:\n${input.text.slice(0, 24000)}`,
+    4096,
   );
 
   if (!raw) return fallback;
@@ -198,38 +226,48 @@ Do not invent phone numbers, emails, or addresses. Leave them empty and list the
 
 function templateCopy(company: CompanyData): SiteContentMap {
   const offerings = company.services.length ? company.services : company.products;
+  const primary = offerings[0];
+  const audienceHint = company.industry ? ` for ${company.industry.toLowerCase()} clients` : "";
   return {
     hero: {
-      headline: company.tagline || company.name,
-      subheadline: company.description,
-      ctaLabel: "Get in touch",
+      headline: company.tagline || `Welcome to ${company.name}`,
+      subheadline:
+        company.description ||
+        (primary
+          ? `${company.name} delivers ${primary.title.toLowerCase()}${audienceHint}.`
+          : `${company.name} — clear, professional, ready to grow.`),
+      ctaLabel: company.contact.whatsapp ? "Chat on WhatsApp" : "Get in touch",
       ctaHref: "#contact",
     },
     about: {
       title: `About ${company.name}`,
-      body: company.description,
+      body:
+        company.description ||
+        `${company.name} helps people get results without the noise. Tell us what you need — we’ll take it from there.`,
     },
     services: {
-      title: "Services",
-      items: company.services,
+      title: "What we offer",
+      items: company.services.length
+        ? company.services
+        : [{ title: "Consultation", description: "A clear plan tailored to your goals." }],
     },
     products: {
       title: "Products",
       items: company.products,
     },
     testimonials: {
-      title: "What clients say",
+      title: "Trusted by clients",
       items: [
         {
-          quote: `${company.name} made the process straightforward and the result looks like a real company site.`,
+          quote: `${company.name} made everything straightforward — the site feels like a real brand, not a placeholder.`,
           author: "A recent client",
           role: company.industry || "Customer",
         },
       ],
     },
     cta: {
-      headline: `Work with ${company.name}`,
-      body: company.tagline || "Tell us what you need. We'll take it from there.",
+      headline: `Ready to work with ${company.name}?`,
+      body: company.tagline || "Tell us what you need. We’ll reply within one business day.",
       buttonLabel: "Contact us",
     },
     contact: {
@@ -252,6 +290,33 @@ function templateCopy(company: CompanyData): SiteContentMap {
   };
 }
 
+function mergeValidatedContent(
+  base: SiteContentMap,
+  partial: Partial<SiteContentMap> | undefined,
+): SiteContentMap {
+  if (!partial) return base;
+  const next = { ...base };
+  for (const key of SECTION_KEYS) {
+    const incoming = partial[key];
+    if (!incoming || typeof incoming !== "object") continue;
+    const schema = sectionSchemas[key];
+    const parsed = schema.safeParse({ ...base[key], ...incoming });
+    if (parsed.success) {
+      (next as Record<string, unknown>)[key] = parsed.data;
+    }
+  }
+  return next;
+}
+
+function defaultSectionOrder(company: CompanyData): SectionKey[] {
+  return [...SECTION_KEYS].filter((key) => {
+    if (key === "services" && company.services.length === 0) return false;
+    if (key === "products" && company.products.length === 0) return false;
+    if (key === "gallery" && company.media.length === 0) return false;
+    return true;
+  });
+}
+
 export async function generateSiteContent(input: {
   company: CompanyData;
   mode: "template" | "ai_custom";
@@ -263,12 +328,7 @@ export async function generateSiteContent(input: {
   sectionOrder: SectionKey[];
 }> {
   const base = templateCopy(input.company);
-  const sectionOrder: SectionKey[] = [...SECTION_KEYS].filter((key) => {
-    if (key === "services" && input.company.services.length === 0) return false;
-    if (key === "products" && input.company.products.length === 0) return false;
-    if (key === "gallery" && input.company.media.length === 0) return false;
-    return true;
-  });
+  const sectionOrder = defaultSectionOrder(input.company);
 
   if (input.mode === "template") {
     return {
@@ -279,11 +339,18 @@ export async function generateSiteContent(input: {
     };
   }
 
+  const mediaNote = input.company.media.length
+    ? `Media available: ${input.company.media.map((m) => m.kind).join(", ")} (${input.company.media.length} files). Include gallery.`
+    : "No media files — omit gallery from sectionOrder.";
+
   const raw = await completeJson(
-    `You write website copy for a small-business marketing site. Return ONLY JSON:
+    `You are an elite website copywriter and information architect (v0 / Linear / Stripe quality).
+Build a small-business marketing site that feels intentional — not template filler.
+
+Return ONLY JSON:
 {
   "layoutVariant": "standard" | "split" | "stacked" | "asymmetric",
-  "palette": string[] (4-5 hex colors, accessible, based on brandColor),
+  "palette": string[] (4-5 hex colors, accessible, derived from brandColor),
   "sectionOrder": string[] (subset of hero, about, services, products, gallery, testimonials, cta, contact, footer — hero first, footer last),
   "content": {
     "hero": {"headline": string, "subheadline": string, "ctaLabel": string, "ctaHref": "#contact"},
@@ -297,8 +364,18 @@ export async function generateSiteContent(input: {
     "footer": {"blurb": string}
   }
 }
-Rules: do not invent contact details. Include gallery only if the company has media. Keep contrast-friendly hex colors. Max 9 sections. Tone must match the company tone. Template hint: ${input.templateId}.`,
+
+Quality bar:
+- Hero headline: short, specific, memorable (not "Welcome to …" unless unavoidable).
+- Subheadline: concrete benefit + audience; 1–2 sentences max.
+- Services/products: benefit-led descriptions; keep real titles from company data.
+- Testimonials: plausible but generic if no real quotes — never invent company names or fake contact info.
+- Contact fields: copy ONLY from company.contact; never invent.
+- Tone must match company.tone. Template hint: ${input.templateId}.
+- ${mediaNote}
+- Prefer fewer strong sections over many weak ones. Max 9 sections.`,
     JSON.stringify(input.company),
+    8192,
   );
 
   if (!raw || typeof raw !== "object") {
@@ -317,11 +394,16 @@ Rules: do not invent contact details. Include gallery only if the company has me
     content?: Partial<SiteContentMap>;
   };
 
+  const order =
+    data.sectionOrder?.filter((k) => SECTION_KEYS.includes(k)).length
+      ? data.sectionOrder.filter((k) => SECTION_KEYS.includes(k))
+      : sectionOrder;
+
   return {
-    content: { ...base, ...data.content },
+    content: mergeValidatedContent(base, data.content),
     layoutVariant: data.layoutVariant || "split",
     palette: data.palette?.length ? data.palette : input.company.palette,
-    sectionOrder: data.sectionOrder?.length ? data.sectionOrder : sectionOrder,
+    sectionOrder: order,
   };
 }
 
@@ -331,13 +413,105 @@ export async function regenerateSection(input: {
   current: Record<string, unknown>;
 }) {
   const raw = await completeJson(
-    `Rewrite only this website section. Keep facts (names, contact, offerings) accurate. Return ONLY the JSON object for the section, no wrapper.`,
+    `Rewrite only this website section to a higher quality bar (v0-level clarity).
+Keep facts accurate (names, contact, offerings). Improve specificity and rhythm.
+Return ONLY the JSON object for the section (${input.sectionKey}), no wrapper.`,
     JSON.stringify({
       company: input.company,
       sectionKey: input.sectionKey,
       current: input.current,
     }),
+    2048,
   );
-  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+  if (raw && typeof raw === "object") {
+    const schema = sectionSchemas[input.sectionKey];
+    const parsed = schema.safeParse(raw);
+    if (parsed.success) return parsed.data as Record<string, unknown>;
+    return raw as Record<string, unknown>;
+  }
   return input.current;
+}
+
+export type IterateResult = {
+  summary: string;
+  content: SiteContentMap;
+  sectionOrder: SectionKey[];
+  palette?: string[];
+  layoutVariant?: LayoutVariant;
+};
+
+/** Chat-style iterate: apply a natural-language instruction to the whole site (or focused section). */
+export async function iterateSiteContent(input: {
+  company: CompanyData;
+  content: Partial<SiteContentMap>;
+  sectionOrder: SectionKey[];
+  instruction: string;
+  focusSection?: SectionKey | null;
+  templateId: TemplateId;
+  layoutVariant: LayoutVariant;
+  palette: string[];
+}): Promise<IterateResult> {
+  const base = mergeValidatedContent(templateCopy(input.company), input.content as Partial<SiteContentMap>);
+  const focus = input.focusSection
+    ? `Focus changes primarily on the "${input.focusSection}" section, but you may lightly adjust adjacent sections if needed for coherence.`
+    : "You may update any sections needed to fulfill the instruction.";
+
+  const raw = await completeJson(
+    `You are an in-editor AI for a website builder (like v0 chat).
+The user gives an instruction; you return an updated site JSON. Preserve contact facts and real offerings.
+
+${focus}
+
+Return ONLY JSON:
+{
+  "summary": string (one short sentence describing what you changed),
+  "layoutVariant": "standard" | "split" | "stacked" | "asymmetric",
+  "palette": string[] (optional; only if colors should change),
+  "sectionOrder": string[] (optional; only if order/sections should change),
+  "content": { ...same section shapes as the site; include every section you change; omit unchanged sections }
+}
+
+Rules:
+- Do not invent emails, phones, addresses, or social handles.
+- Keep brand voice. Prefer concrete edits over rewriting everything.
+- Template context: ${input.templateId}.`,
+    JSON.stringify({
+      instruction: input.instruction,
+      company: input.company,
+      sectionOrder: input.sectionOrder,
+      layoutVariant: input.layoutVariant,
+      palette: input.palette,
+      content: base,
+    }),
+    8192,
+  );
+
+  if (!raw || typeof raw !== "object") {
+    return {
+      summary: "Could not apply that change automatically. Try a more specific instruction.",
+      content: base,
+      sectionOrder: input.sectionOrder,
+    };
+  }
+
+  const data = raw as {
+    summary?: string;
+    layoutVariant?: LayoutVariant;
+    palette?: string[];
+    sectionOrder?: SectionKey[];
+    content?: Partial<SiteContentMap>;
+  };
+
+  const order =
+    data.sectionOrder?.filter((k) => SECTION_KEYS.includes(k)).length
+      ? data.sectionOrder.filter((k) => SECTION_KEYS.includes(k))
+      : input.sectionOrder;
+
+  return {
+    summary: data.summary || "Updated the site from your instruction.",
+    content: mergeValidatedContent(base, data.content),
+    sectionOrder: order,
+    palette: data.palette,
+    layoutVariant: data.layoutVariant,
+  };
 }

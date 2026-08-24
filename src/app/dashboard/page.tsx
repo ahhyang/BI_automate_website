@@ -96,21 +96,20 @@ export default async function DashboardPage() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <ButtonLink href={`/sites/${site.id}`} variant="ghost">
-                        Overview
-                      </ButtonLink>
                       <ButtonLink href={`/sites/${site.id}/preview`} variant="ghost">
-                        Edit
+                        Preview
+                      </ButtonLink>
+                      <ButtonLink href={`/sites/${site.id}/develop`} variant="ghost">
+                        Develop
+                      </ButtonLink>
+                      <ButtonLink href={`/sites/${site.id}/project`} variant={live ? "ghost" : "primary"}>
+                        Project
                       </ButtonLink>
                       {live ? (
                         <ButtonLink href={url} variant="primary">
                           View live
                         </ButtonLink>
-                      ) : (
-                        <ButtonLink href={`/sites/${site.id}/publish`} variant="primary">
-                          Launch
-                        </ButtonLink>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </article>

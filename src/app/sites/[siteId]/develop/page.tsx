@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
-import { SitePreview } from "@/components/portal/SitePreview";
+import { PreviewEditor } from "@/components/portal/PreviewEditor";
 import { PortalNav } from "@/components/portal/PortalNav";
 import { FlowStepper } from "@/components/portal/FlowStepper";
 import { getSession } from "@/lib/auth";
 import { loadSiteModel } from "@/lib/sites";
 import type { Params } from "@/lib/page-props";
 
-export default async function PreviewPage({ params }: Params<{ siteId: string }>) {
+export default async function DevelopPage({ params }: Params<{ siteId: string }>) {
   const session = await getSession();
   if (!session) notFound();
   const { siteId } = await params;
@@ -16,8 +16,8 @@ export default async function PreviewPage({ params }: Params<{ siteId: string }>
   return (
     <div>
       <PortalNav email={session.email} isGuest={session.isGuest} />
-      <FlowStepper siteId={siteId} current="preview" />
-      <SitePreview siteId={siteId} model={model} live={model.status === "live"} />
+      <FlowStepper siteId={siteId} current="develop" />
+      <PreviewEditor siteId={siteId} initial={model} isGuest={session.isGuest} />
     </div>
   );
 }

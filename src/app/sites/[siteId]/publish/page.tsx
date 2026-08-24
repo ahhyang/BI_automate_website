@@ -1,39 +1,8 @@
-import { PortalNav } from "@/components/portal/PortalNav";
-import { PublishPanel } from "@/components/portal/PublishPanel";
-import { FlowStepper } from "@/components/portal/FlowStepper";
-import { getSession } from "@/lib/auth";
-import { getOwnedSite } from "@/lib/owned-site";
-import { getEntitlements } from "@/lib/usage";
-import { siteUrl, storageLabel } from "@/lib/host";
-import { companyDataSchema } from "@/types/content";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import type { Params } from "@/lib/page-props";
 
-export default async function PublishPage({ params }: Params<{ siteId: string }>) {
-  const session = await getSession();
-  if (!session) notFound();
+/** Legacy launch URL — Project console is the control center. */
+export default async function PublishRedirect({ params }: Params<{ siteId: string }>) {
   const { siteId } = await params;
-  const site = await getOwnedSite(siteId, session);
-  const entitlements = await getEntitlements(session.tenantId);
-  const company = companyDataSchema.safeParse(site.companyData ?? {});
-  const mediaCount = company.success ? company.data.media.length : 0;
-
-  return (
-    <div>
-      <PortalNav email={session.email} isGuest={session.isGuest} />
-      <FlowStepper siteId={site.id} current="publish" />
-      <PublishPanel
-        siteId={site.id}
-        siteName={site.name}
-        subdomain={site.subdomain}
-        customDomain={site.customDomain}
-        canCustomDomain={entitlements.canCustomDomain}
-        isPro={entitlements.plan.id === "pro"}
-        mediaCount={mediaCount}
-        liveUrl={site.status === "live" ? siteUrl(site.subdomain) : null}
-        isGuest={session.isGuest}
-        storageName={storageLabel()}
-      />
-    </div>
-  );
+  redirect(`/sites/${siteId}/project`);
 }

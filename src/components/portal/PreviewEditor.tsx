@@ -17,10 +17,16 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { SectionKey, SiteContentMap, SiteRenderModel, TemplateId } from "@/types/content";
+import type {
+  LayoutVariant,
+  SectionKey,
+  SiteContentMap,
+  SiteRenderModel,
+  TemplateId,
+} from "@/types/content";
 import { TEMPLATE_IDS } from "@/types/content";
 import { SiteRenderer } from "@/components/site/SiteRenderer";
-import { Button, ButtonLink } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 import { ErrorNote } from "@/components/ui/Field";
 import { SectionFields } from "./SectionFields";
 import { UpgradePrompt } from "./UpgradePrompt";
@@ -37,10 +43,12 @@ const LABELS: Record<SectionKey, string> = {
   footer: "Footer",
 };
 
+type ChatMsg = { role: "user" | "assistant"; text: string };
+
 export function PreviewEditor({
   siteId,
   initial,
-  isGuest,
+  isGuest: _isGuest,
 }: {
   siteId: string;
   initial: SiteRenderModel;
@@ -51,10 +59,20 @@ export function PreviewEditor({
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [selected, setSelected] = useState<SectionKey>(initial.sectionOrder[0] || "hero");
   const [busy, setBusy] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [regenBusy, setRegenBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [upgrade, setUpgrade] = useState<"regenerations" | null>(null);
+  const [upgrade, setUpgrade] = useState<"regenerations" | "ai_custom" | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chat, setChat] = useState<ChatMsg[]>([
+    {
+      role: "assistant",
+      text: "Tell me what to change — e.g. “Make the hero shorter” or “Add a warmer tone to About”.",
+    },
+  ]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -63,6 +81,10 @@ export function PreviewEditor({
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat, chatBusy]);
 
   async function persistSection(key: SectionKey, content: SiteContentMap[SectionKey]) {
     setSaving(true);
@@ -139,6 +161,111 @@ export function PreviewEditor({
     }
   }
 
+  async function runIterate(instruction: string) {
+    const trimmed = instruction.trim();
+    if (!trimmed || chatBusy) return;
+    setChatBusy(true);
+    setError("");
+    setChat((prev) => [...prev, { role: "user", text: trimmed }]);
+    setChatInput("");
+
+    const res = await fetch("/api/iterate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteId,
+        instruction: trimmed,
+        focusSection: selected,
+      }),
+    });
+    const json = (await res.json()) as {
+      summary?: string;
+      content?: SiteContentMap;
+      sectionOrder?: SectionKey[];
+      palette?: string[];
+      layoutVariant?: LayoutVariant;
+      error?: string;
+      reason?: string;
+    };
+    setChatBusy(false);
+
+    if (res.status === 402) {
+      setUpgrade("regenerations");
+      setChat((prev) => [
+        ...prev,
+        { role: "assistant", text: "You're out of regenerations this month. Upgrade to keep iterating." },
+      ]);
+      return;
+    }
+    if (!res.ok || !json.content) {
+      setError(json.error || "Couldn't apply that change.");
+      setChat((prev) => [
+        ...prev,
+        { role: "assistant", text: json.error || "That didn't work — try a clearer instruction." },
+      ]);
+      return;
+    }
+
+    setModel((prev) => ({
+      ...prev,
+      content: json.content!,
+      sectionOrder: json.sectionOrder?.length ? json.sectionOrder : prev.sectionOrder,
+      palette: json.palette?.length ? json.palette : prev.palette,
+      layoutVariant: json.layoutVariant || prev.layoutVariant,
+    }));
+    setChat((prev) => [
+      ...prev,
+      { role: "assistant", text: json.summary || "Updated the site from your instruction." },
+    ]);
+  }
+
+  async function regenerateWholeSite() {
+    setRegenBusy(true);
+    setError("");
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siteId, mode: "ai_custom", templateId: model.templateId }),
+    });
+    if (!res.ok || !res.body) {
+      setRegenBusy(false);
+      const err = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+      if (res.status === 402 && err.reason === "ai_custom") {
+        setUpgrade("ai_custom");
+        return;
+      }
+      setError(err.error || "Whole-site regenerate didn't start.");
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let ok = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) {
+        const event = chunk.match(/^event: (.+)$/m)?.[1];
+        const dataLine = chunk.match(/^data: (.+)$/m)?.[1];
+        if (!event || !dataLine) continue;
+        if (event === "error") {
+          const data = JSON.parse(dataLine) as { message?: string };
+          setError(data.message || "Whole-site regenerate failed.");
+        }
+        if (event === "done") ok = true;
+      }
+    }
+    setRegenBusy(false);
+    if (ok) {
+      router.refresh();
+      window.location.reload();
+    }
+  }
+
   async function swapTemplate(templateId: TemplateId) {
     setModel((prev) => ({ ...prev, templateId }));
     await fetch("/api/sites", {
@@ -149,13 +276,13 @@ export function PreviewEditor({
   }
 
   return (
-    <div className="grid min-h-[70vh] lg:grid-cols-[340px_1fr]">
+    <div className="grid min-h-[70vh] lg:grid-cols-[360px_1fr]">
       <aside className="flex max-h-screen flex-col border-r border-line bg-white">
         <div className="border-b border-line p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-accent">Customize</p>
-          <h1 className="mt-2 font-display text-3xl">Drag · edit · publish</h1>
+          <p className="text-xs uppercase tracking-[0.2em] text-accent">Develop</p>
+          <h1 className="mt-2 font-display text-3xl">Edit · chat · ship</h1>
           <p className="mt-1 text-xs text-ink-soft">
-            {saving ? "Saving…" : "Changes autosave. Drag sections to reorder."}
+            {saving ? "Saving…" : "Autosave on. Use AI chat to iterate like v0."}
           </p>
           <div className="mt-4 flex gap-3 text-xs">
             <button
@@ -187,6 +314,16 @@ export function PreviewEditor({
               ))}
             </select>
           </label>
+          <div className="mt-3">
+            <Button
+              variant="ghost"
+              className="w-full text-xs"
+              disabled={regenBusy}
+              onClick={() => void regenerateWholeSite()}
+            >
+              {regenBusy ? "Regenerating site…" : "Regenerate whole site (AI)"}
+            </Button>
+          </div>
         </div>
 
         <div className="border-b border-line p-4">
@@ -301,13 +438,52 @@ export function PreviewEditor({
           ) : null}
         </div>
 
-        <div className="border-t border-line p-4">
-          <Button
-            onClick={() => router.push(`/sites/${siteId}/publish`)}
+        <div className="border-t border-line bg-paper/60 p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">
+            AI iterate · focused on {LABELS[selected]}
+          </p>
+          <div className="mb-2 max-h-28 space-y-2 overflow-auto text-xs">
+            {chat.map((m, i) => (
+              <p
+                key={`${m.role}-${i}`}
+                className={m.role === "user" ? "text-ink" : "rounded-lg bg-white px-2 py-1.5 text-ink-soft"}
+              >
+                {m.role === "user" ? `You: ${m.text}` : m.text}
+              </p>
+            ))}
+            {chatBusy ? <p className="text-ink-soft">Thinking…</p> : null}
+            <div ref={chatEndRef} />
+          </div>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runIterate(chatInput);
+            }}
           >
-            Publish
+            <input
+              className="min-w-0 flex-1 rounded-xl border border-line bg-white px-3 py-2 text-sm"
+              placeholder="e.g. Shorten the hero…"
+              value={chatInput}
+              disabled={chatBusy}
+              onChange={(e) => setChatInput(e.target.value)}
+            />
+            <Button type="submit" disabled={chatBusy || !chatInput.trim()}>
+              Apply
+            </Button>
+          </form>
+        </div>
+
+        <div className="space-y-2 border-t border-line p-4">
+          <Button onClick={() => router.push(`/sites/${siteId}/project`)}>Project & publish</Button>
+          <Button
+            variant="ghost"
+            className="w-full"
+            onClick={() => router.push(`/sites/${siteId}/preview`)}
+          >
+            Back to Preview
           </Button>
-          <p className="mt-2 text-xs text-ink-soft">Free to test — no payment required.</p>
+          <p className="text-xs text-ink-soft">Free to test — no payment required.</p>
         </div>
       </aside>
 

@@ -92,9 +92,9 @@ export default async function HomePage() {
 
       <section className="mx-auto grid max-w-6xl gap-6 px-5 py-16 md:grid-cols-3">
         {[
-          ["1. Drop everything", "PDFs, photos, videos, WhatsApp, Gmail, Instagram — all in one place."],
-          ["2. Customize", "Drag sections to reorder. Click any block to edit copy, captions, and links."],
-          ["3. Publish", "Live on a subdomain immediately. Custom domain is a Pro add-on, not a requirement."],
+          ["1. Create", "Drop a PDF, photos, and links. AI Custom builds a first draft (Fast Template if you want speed)."],
+          ["2. Preview → Develop", "Review the live preview, then open Develop to edit sections, copy, and regenerate."],
+          ["3. Project", "Hosting, domain, database, AI, and credits in one place — then publish."],
         ].map(([title, body]) => (
           <div key={title} className="rounded-3xl border border-line p-6">
             <h3 className="font-display text-2xl">{title}</h3>

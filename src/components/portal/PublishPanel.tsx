@@ -20,6 +20,8 @@ export function PublishPanel({
   liveUrl,
   isGuest,
   storageName,
+  focus = "all",
+  embedded = false,
 }: {
   siteId: string;
   siteName: string;
@@ -31,7 +33,13 @@ export function PublishPanel({
   liveUrl: string | null;
   isGuest: boolean;
   storageName: string;
+  focus?: "all" | "hosting" | "domain" | "database";
+  embedded?: boolean;
 }) {
+  const showHosting = focus === "all" || focus === "hosting";
+  const showDomain = focus === "all" || focus === "domain";
+  const showData = focus === "all" || focus === "database";
+  const showPublish = focus === "all" || focus === "hosting" || focus === "domain";
   const router = useRouter();
   const root = getRootDomain();
   const pathMode = root.includes("vercel.app");
@@ -91,7 +99,7 @@ export function PublishPanel({
     const json = (await res.json()) as { url?: string; error?: string; code?: string };
     setBusy(false);
     if (res.status === 401 && json.code === "signup_required") {
-      router.push(`/signup?next=/sites/${siteId}/publish`);
+      router.push(`/signup?next=/sites/${siteId}/project`);
       return;
     }
     if (!res.ok) {
@@ -131,18 +139,23 @@ export function PublishPanel({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-10">
-      <p className="text-xs uppercase tracking-[0.2em] text-accent">Launch</p>
-      <h1 className="mt-3 font-display text-5xl">
-        {published ? "Live — share it anywhere." : "Choose how you go live."}
-      </h1>
-      <p className="mt-3 text-ink-soft">
-        Hosting, database, and storage are included. Pick your address, then publish.
-      </p>
+    <div className={embedded ? "py-4" : "mx-auto max-w-3xl px-5 py-10"}>
+      {!embedded ? (
+        <>
+          <p className="text-xs uppercase tracking-[0.2em] text-accent">Project</p>
+          <h1 className="mt-3 font-display text-5xl">
+            {published ? "Live — share it anywhere." : "Choose how you go live."}
+          </h1>
+          <p className="mt-3 text-ink-soft">
+            Hosting, database, and storage are included. Pick your address, then publish.
+          </p>
+        </>
+      ) : null}
 
       {/* Hosting */}
-      <section className="mt-8 rounded-3xl border border-line bg-white p-6">
-        <h2 className="font-display text-2xl">1. Hosting</h2>
+      {showHosting ? (
+      <section className={`${embedded ? "mt-4" : "mt-8"} rounded-3xl border border-line bg-white p-6`}>
+        <h2 className="font-display text-2xl">{embedded ? "Hosting" : "1. Hosting"}</h2>
         <p className="mt-1 text-sm text-ink-soft">Your site runs on Siteform Cloud — no separate Vercel project to manage.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <button
@@ -173,10 +186,12 @@ export function PublishPanel({
           <li className="rounded-xl bg-paper px-3 py-2">Media · {storageName}</li>
         </ul>
       </section>
+      ) : null}
 
       {/* Domain / address */}
+      {showDomain ? (
       <section className="mt-5 rounded-3xl border border-line bg-white p-6">
-        <h2 className="font-display text-2xl">2. Address</h2>
+        <h2 className="font-display text-2xl">{embedded ? "Domain" : "2. Address"}</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Free subdomain for every site. Custom domain on Pro.
         </p>
@@ -216,10 +231,12 @@ export function PublishPanel({
           ) : null}
         </div>
       </section>
+      ) : null}
 
       {/* Data */}
+      {showData ? (
       <section className="mt-5 rounded-3xl border border-line bg-white p-6">
-        <h2 className="font-display text-2xl">3. Your data</h2>
+        <h2 className="font-display text-2xl">{embedded ? "Database & files" : "3. Your data"}</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl border border-line p-4">
             <p className="text-xs uppercase tracking-widest text-ink-soft">Database</p>
@@ -240,8 +257,9 @@ export function PublishPanel({
           </div>
         </div>
       </section>
+      ) : null}
 
-      {published ? (
+      {showPublish && published ? (
         <div className="mt-8 rounded-3xl border border-line bg-white p-6 text-center">
           <p className="text-sm text-ink-soft">Public URL</p>
           <p className="mt-2 break-all font-display text-3xl">{url}</p>
@@ -257,21 +275,26 @@ export function PublishPanel({
             >
               Open live site
             </a>
-            <ButtonLink href={`/sites/${siteId}/preview`} variant="ghost">
-              Keep editing
+            <ButtonLink href={`/sites/${siteId}/develop`} variant="ghost">
+              Keep developing
             </ButtonLink>
           </div>
         </div>
-      ) : (
+      ) : null}
+
+      {showPublish && !published ? (
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <Button onClick={() => void publish()} disabled={busy}>
             {busy ? "Publishing…" : "Publish now — free to test"}
           </Button>
+          <ButtonLink href={`/sites/${siteId}/develop`} variant="ghost">
+            Back to Develop
+          </ButtonLink>
           <ButtonLink href={`/sites/${siteId}/preview`} variant="ghost">
-            Back to editor
+            Preview
           </ButtonLink>
         </div>
-      )}
+      ) : null}
 
       {error ? (
         <div className="mt-4">

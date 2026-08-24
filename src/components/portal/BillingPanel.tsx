@@ -8,9 +8,11 @@ import { ErrorNote } from "@/components/ui/Field";
 export function BillingPanel({
   plan,
   stripeReady,
+  compact = false,
 }: {
   plan: "free" | "pro";
   stripeReady: boolean;
+  compact?: boolean;
 }) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -43,20 +45,24 @@ export function BillingPanel({
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-10">
-      <h1 className="font-display text-5xl">Plans</h1>
-      <p className="mt-3 text-ink-soft">You are on {plan === "pro" ? "Pro" : "Free"}.</p>
-      <div className="mt-8 grid gap-4 md:grid-cols-2">
+    <div className={compact ? "" : "mx-auto max-w-4xl px-5 py-10"}>
+      {!compact ? (
+        <>
+          <h1 className="font-display text-5xl">Plans</h1>
+          <p className="mt-3 text-ink-soft">You are on {plan === "pro" ? "Pro" : "Free"}.</p>
+        </>
+      ) : (
+        <h2 className="font-display text-2xl">Top up / upgrade</h2>
+      )}
+      <div className={`${compact ? "mt-4" : "mt-8"} grid gap-4 md:grid-cols-2`}>
         <article className="rounded-3xl border border-line p-6">
           <h2 className="font-display text-3xl">Free</h2>
           <p className="mt-2 text-4xl">$0</p>
           <ul className="mt-4 space-y-2 text-sm text-ink-soft">
-            <li>{PLANS.free.siteLimit} site</li>
-            <li>Quick Template</li>
-            <li>1 AI Custom trial</li>
+            <li>{PLANS.free.siteLimit} sites</li>
+            <li>AI Custom + Fast Template</li>
             <li>Subdomain hosting</li>
             <li>{PLANS.free.regenerationsPerMonth} regenerations / month</li>
-            <li>Siteform badge</li>
           </ul>
         </article>
         <article className="rounded-3xl border border-ink bg-white p-6">
@@ -68,11 +74,9 @@ export function BillingPanel({
           <p className="text-sm text-ink-soft">${PLANS.pro.annualPrice}/yr if you pay annually</p>
           <ul className="mt-4 space-y-2 text-sm text-ink-soft">
             <li>{PLANS.pro.siteLimit} sites</li>
-            <li>AI Custom</li>
-            <li>Custom domain</li>
-            <li>Analytics</li>
+            <li>Custom domain · analytics</li>
             <li>{PLANS.pro.regenerationsPerMonth} regenerations / month</li>
-            <li>No badge</li>
+            <li>No Siteform badge</li>
           </ul>
           {plan === "pro" ? (
             <div className="mt-6">
@@ -81,7 +85,7 @@ export function BillingPanel({
               </Button>
             </div>
           ) : (
-            <div className="mt-6 flex gap-2">
+            <div className="mt-6 flex flex-wrap gap-2">
               <Button onClick={() => checkout("month")} disabled={pending || !stripeReady}>
                 Upgrade monthly
               </Button>
@@ -105,7 +109,7 @@ export function BillingPanel({
           <ErrorNote message={error} />
         </div>
       ) : null}
-      <p className="mt-8 max-w-2xl text-sm text-ink-soft">{DOWNGRADE_POLICY}</p>
+      <p className={`${compact ? "mt-4" : "mt-8"} max-w-2xl text-sm text-ink-soft`}>{DOWNGRADE_POLICY}</p>
     </div>
   );
 }

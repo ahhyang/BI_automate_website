@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
-import { extractCompanyData, extractFromQuestions } from "@/lib/llm/pipeline";
+import { extractCompanyData, extractFromQuestions, needsExtractReview } from "@/lib/llm/pipeline";
 import {
   companyDataSchema,
   fiveQuestionsSchema,
@@ -157,5 +157,10 @@ export async function POST(request: Request) {
     })
     .where(eq(sites.id, site.id));
 
-  return NextResponse.json({ company, subdomain });
+  return NextResponse.json({
+    company,
+    subdomain,
+    needsReview: needsExtractReview(company),
+    uncertainFields: company.uncertainFields,
+  });
 }

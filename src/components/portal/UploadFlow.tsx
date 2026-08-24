@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LinksInput, MediaItem, TemplateId } from "@/types/content";
+import type { CompanyData, LinksInput, MediaItem, TemplateId } from "@/types/content";
 import { Button } from "@/components/ui/Button";
 import { ErrorNote, Field, inputClass } from "@/components/ui/Field";
 import { UpgradePrompt } from "./UpgradePrompt";
 
-type Progress = "idle" | "reading" | "extracting" | "generating" | "done";
+type Progress = "idle" | "reading" | "extracting" | "review" | "generating" | "done";
 
 const GEN_STEPS = [
   { key: "copy", label: "Writing homepage copy" },
@@ -48,6 +48,7 @@ function progressPercent(
   if (progress === "idle") return 0;
   if (progress === "reading") return 12;
   if (progress === "extracting") return 35;
+  if (progress === "review") return 42;
   if (progress === "done") return 100;
   const done = genSteps.filter((s) => s.status === "done").length;
   const running = genSteps.some((s) => s.status === "running") ? 0.5 : 0;
@@ -57,11 +58,12 @@ function progressPercent(
 function statusHeadline(progress: Progress, genSteps: { key: string; label: string; status: string }[]) {
   if (progress === "reading") return "Uploading your files and links…";
   if (progress === "extracting") return "Reading the document and extracting company details…";
+  if (progress === "review") return "Quick check — confirm a few details before we design the site";
   if (progress === "generating") {
     const running = genSteps.find((s) => s.status === "running");
     return running ? `${running.label}…` : "Generating your website…";
   }
-  if (progress === "done") return "Preview ready — opening editor…";
+  if (progress === "done") return "Preview ready — opening…";
   return "";
 }
 
@@ -76,6 +78,7 @@ export function UploadFlow() {
   const [questions, setQuestions] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [templateId, setTemplateId] = useState<TemplateId>("classic");
+  const [genMode, setGenMode] = useState<"ai_custom" | "template">("ai_custom");
   const [q, setQ] = useState({
     companyName: "",
     oneLiner: "",
@@ -89,7 +92,10 @@ export function UploadFlow() {
     GEN_STEPS.map((s) => ({ ...s, status: "pending" as "pending" | "running" | "done" | "failed" })),
   );
   const [error, setError] = useState("");
-  const [upgrade, setUpgrade] = useState<"site_limit" | null>(null);
+  const [upgrade, setUpgrade] = useState<"site_limit" | "ai_custom" | null>(null);
+  const [reviewSiteId, setReviewSiteId] = useState<string | null>(null);
+  const [reviewCompany, setReviewCompany] = useState<CompanyData | null>(null);
+  const [reviewServices, setReviewServices] = useState("");
 
   const logoUrl = useMemo(() => (logo ? URL.createObjectURL(logo) : null), [logo]);
   useEffect(() => {
@@ -141,7 +147,140 @@ export function UploadFlow() {
     abortRef.current = null;
     setProgress("idle");
     setStatusDetail("");
+    setReviewSiteId(null);
+    setReviewCompany(null);
     setError("Cancelled. You can change files and try again.");
+  }
+
+  async function runGenerate(siteId: string, signal: AbortSignal) {
+    setProgress("generating");
+    setStatusDetail(
+      genMode === "ai_custom"
+        ? "AI is designing a custom layout and copy…"
+        : "Building your website from a template…",
+    );
+    setGenSteps((prev) => prev.map((s, i) => ({ ...s, status: i === 0 ? "running" : "pending" })));
+    const genRes = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        siteId,
+        mode: genMode,
+        templateId,
+      }),
+    });
+    if (!genRes.ok || !genRes.body) {
+      setProgress("idle");
+      const err = (await genRes.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      if (genRes.status === 402 && err.reason === "ai_custom") {
+        setUpgrade("ai_custom");
+        return;
+      }
+      setError(err.error || "Generation didn't start. Try again.");
+      return;
+    }
+
+    const reader = genRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finished = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) {
+        const event = chunk.match(/^event: (.+)$/m)?.[1];
+        const dataLine = chunk.match(/^data: (.+)$/m)?.[1];
+        if (!event || !dataLine) continue;
+        if (event === "steps") {
+          try {
+            const steps = JSON.parse(dataLine) as typeof genSteps;
+            setGenSteps(steps);
+            const running = steps.find((s) => s.status === "running");
+            if (running) setStatusDetail(running.label);
+          } catch {
+            /* ignore */
+          }
+        }
+        if (event === "error") {
+          const data = JSON.parse(dataLine) as { message?: string };
+          setError(data.message || "Generation didn't finish. Try again.");
+          setProgress("idle");
+          return;
+        }
+        if (event === "done") {
+          finished = true;
+          setProgress("done");
+          setStatusDetail("Opening preview…");
+          router.push(`/sites/${siteId}/preview`);
+        }
+      }
+    }
+    if (!finished) {
+      setProgress("idle");
+      setError("Generation stopped early. Try again.");
+    }
+  }
+
+  async function continueAfterReview() {
+    if (!reviewSiteId || !reviewCompany) return;
+    if (!reviewCompany.name.trim()) {
+      setError("Add a company name before continuing.");
+      return;
+    }
+    setError("");
+    const services = reviewServices
+      .split(/\n|,/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((title) => ({
+        title,
+        description:
+          reviewCompany.services.find((s) => s.title === title)?.description ||
+          `Learn more about ${title.toLowerCase()}.`,
+      }));
+    const company: CompanyData = {
+      ...reviewCompany,
+      name: reviewCompany.name.trim(),
+      tagline: reviewCompany.tagline.trim(),
+      description: reviewCompany.description.trim(),
+      services: services.length ? services : reviewCompany.services,
+      uncertainFields: [],
+    };
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const save = await fetch("/api/sites", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
+        body: JSON.stringify({ siteId: reviewSiteId, company }),
+      });
+      if (!save.ok) {
+        setError("Couldn't save those details. Try again.");
+        return;
+      }
+      setReviewCompany(null);
+      await runGenerate(reviewSiteId, ac.signal);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Stopped. You can change details and try again.");
+        setProgress("review");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setProgress("review");
+    } finally {
+      abortRef.current = null;
+    }
   }
 
   async function runPipeline() {
@@ -255,75 +394,30 @@ export function UploadFlow() {
               },
         ),
       });
-      const extractJson = (await extractRes.json().catch(() => ({}))) as { error?: string };
+      const extractJson = (await extractRes.json().catch(() => ({}))) as {
+        error?: string;
+        company?: CompanyData;
+        needsReview?: boolean;
+      };
       if (!extractRes.ok) {
         setProgress("idle");
         setError(extractJson.error || "We couldn't extract details. Try pasting text or the five questions.");
         return;
       }
 
-      setProgress("generating");
-      setStatusDetail("Building your website sections…");
-      setGenSteps((prev) => prev.map((s, i) => ({ ...s, status: i === 0 ? "running" : "pending" })));
-      const genRes = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: ac.signal,
-        body: JSON.stringify({
-          siteId: uploadJson.siteId,
-          mode: "template",
-          templateId,
-        }),
-      });
-      if (!genRes.ok || !genRes.body) {
-        setProgress("idle");
-        const err = (await genRes.json().catch(() => ({}))) as { error?: string };
-        setError(err.error || "Generation didn't start. Try again.");
+      if (extractJson.needsReview && extractJson.company) {
+        setReviewSiteId(uploadJson.siteId);
+        setReviewCompany(extractJson.company);
+        setReviewServices(
+          extractJson.company.services.map((s) => s.title).filter(Boolean).join("\n") ||
+            extractJson.company.products.map((s) => s.title).filter(Boolean).join("\n"),
+        );
+        setProgress("review");
+        setStatusDetail("Confirm name, tagline, and services — then continue.");
         return;
       }
 
-      const reader = genRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finished = false;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() || "";
-        for (const chunk of chunks) {
-          const event = chunk.match(/^event: (.+)$/m)?.[1];
-          const dataLine = chunk.match(/^data: (.+)$/m)?.[1];
-          if (!event || !dataLine) continue;
-          if (event === "steps") {
-            try {
-              const steps = JSON.parse(dataLine) as typeof genSteps;
-              setGenSteps(steps);
-              const running = steps.find((s) => s.status === "running");
-              if (running) setStatusDetail(running.label);
-            } catch {
-              /* ignore */
-            }
-          }
-          if (event === "error") {
-            const data = JSON.parse(dataLine) as { message?: string };
-            setError(data.message || "Generation didn't finish. Try again.");
-            setProgress("idle");
-            return;
-          }
-          if (event === "done") {
-            finished = true;
-            setProgress("done");
-            setStatusDetail("Opening the editor…");
-            router.push(`/sites/${uploadJson.siteId}/preview`);
-          }
-        }
-      }
-      if (!finished) {
-        setProgress("idle");
-        setError("Generation stopped early. Try again.");
-      }
+      await runGenerate(uploadJson.siteId, ac.signal);
     } catch (err) {
       setProgress("idle");
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -342,11 +436,11 @@ export function UploadFlow() {
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-10">
-      <p className="text-xs uppercase tracking-[0.2em] text-accent">Create a site</p>
+      <p className="text-xs uppercase tracking-[0.2em] text-accent">Create</p>
       <h1 className="mt-3 font-display text-5xl">Drop everything you have.</h1>
       <p className="mt-3 max-w-2xl text-ink-soft">
-        Add files, remove anything you don’t want, then click Generate. Keep PDFs under ~4.5 MB for
-        reliable uploads.
+        Add files and links, choose AI Custom or Fast Template, then Generate. You&apos;ll land on
+        Preview — then Develop to edit, Project to host and publish.
       </p>
 
       <DropZone
@@ -476,6 +570,37 @@ export function UploadFlow() {
         </div>
       </div>
 
+      <div className="mt-6 rounded-3xl border border-line bg-white p-5">
+        <h2 className="font-display text-2xl">How should we build it?</h2>
+        <p className="mt-1 text-sm text-ink-soft">AI Custom is the default — closer to a v0-quality first draft.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={progress !== "idle"}
+            onClick={() => setGenMode("ai_custom")}
+            className={`rounded-2xl border p-4 text-left ${
+              genMode === "ai_custom" ? "border-ink" : "border-line"
+            }`}
+          >
+            <p className="text-xs uppercase tracking-widest text-accent">Recommended</p>
+            <p className="mt-1 font-display text-xl">AI Custom</p>
+            <p className="mt-2 text-sm text-ink-soft">Layout, copy, and palette designed for your brand.</p>
+          </button>
+          <button
+            type="button"
+            disabled={progress !== "idle"}
+            onClick={() => setGenMode("template")}
+            className={`rounded-2xl border p-4 text-left ${
+              genMode === "template" ? "border-ink" : "border-line"
+            }`}
+          >
+            <p className="text-xs uppercase tracking-widest text-ink-soft">Faster</p>
+            <p className="mt-1 font-display text-xl">Fast Template</p>
+            <p className="mt-2 text-sm text-ink-soft">Deterministic sections — good when you want speed.</p>
+          </button>
+        </div>
+      </div>
+
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button onClick={() => void runPipeline()} disabled={!canStart}>
           {progress === "idle" ? "Generate site" : "Working…"}
@@ -494,7 +619,81 @@ export function UploadFlow() {
         </button>
       </div>
 
-      {progress !== "idle" ? (
+      {progress === "review" && reviewCompany ? (
+        <div className="mt-8 rounded-3xl border border-line bg-white p-5">
+          <p className="text-xs uppercase tracking-[0.18em] text-accent">Quick review</p>
+          <h2 className="mt-2 font-display text-3xl">Confirm what we found</h2>
+          <p className="mt-2 text-sm text-ink-soft">
+            Extraction was incomplete or uncertain. Fix anything wrong, then continue — this makes AI
+            Custom much better.
+          </p>
+          <div className="mt-5 grid gap-3">
+            <Field label="Company name">
+              <input
+                className={inputClass}
+                value={reviewCompany.name}
+                onChange={(e) => setReviewCompany({ ...reviewCompany, name: e.target.value })}
+              />
+            </Field>
+            <Field label="Tagline">
+              <input
+                className={inputClass}
+                value={reviewCompany.tagline}
+                onChange={(e) => setReviewCompany({ ...reviewCompany, tagline: e.target.value })}
+              />
+            </Field>
+            <Field label="About / description">
+              <textarea
+                className={`${inputClass} min-h-24`}
+                value={reviewCompany.description}
+                onChange={(e) => setReviewCompany({ ...reviewCompany, description: e.target.value })}
+              />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Email">
+                <input
+                  className={inputClass}
+                  value={reviewCompany.contact.email}
+                  onChange={(e) =>
+                    setReviewCompany({
+                      ...reviewCompany,
+                      contact: { ...reviewCompany.contact, email: e.target.value },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Phone">
+                <input
+                  className={inputClass}
+                  value={reviewCompany.contact.phone}
+                  onChange={(e) =>
+                    setReviewCompany({
+                      ...reviewCompany,
+                      contact: { ...reviewCompany.contact, phone: e.target.value },
+                    })
+                  }
+                />
+              </Field>
+            </div>
+            <Field label="Services / products (one per line)">
+              <textarea
+                className={`${inputClass} min-h-24`}
+                value={reviewServices}
+                onChange={(e) => setReviewServices(e.target.value)}
+                placeholder={"Allergy testing\nImmunotherapy\nClinic consultation"}
+              />
+            </Field>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button onClick={() => void continueAfterReview()}>Continue to generate</Button>
+            <button type="button" className="text-sm underline" onClick={cancel}>
+              Start over
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {progress !== "idle" && progress !== "review" ? (
         <div className="mt-8 rounded-3xl border border-line bg-white p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
