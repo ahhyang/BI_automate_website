@@ -203,11 +203,16 @@ export function UploadFlow() {
         reason?: string;
         warning?: string;
       } = {};
+      const rawBody = await uploadRes.text();
       try {
-        uploadJson = (await uploadRes.json()) as typeof uploadJson;
+        uploadJson = rawBody ? (JSON.parse(rawBody) as typeof uploadJson) : {};
       } catch {
         setProgress("idle");
-        setError("Upload failed (server returned an empty response). Try a smaller PDF or paste text.");
+        setError(
+          uploadRes.status >= 500
+            ? `Upload failed (server error ${uploadRes.status}). Try again, or paste the text instead.`
+            : "Upload failed (invalid server response). Try a smaller PDF or paste text.",
+        );
         return;
       }
 
@@ -217,7 +222,10 @@ export function UploadFlow() {
           setUpgrade("site_limit");
           return;
         }
-        setError(uploadJson.error || "Upload didn't work. Try a smaller file or paste the text.");
+        setError(
+          uploadJson.error ||
+            `Upload didn't work (HTTP ${uploadRes.status}). Try a smaller file or paste the text.`,
+        );
         return;
       }
 

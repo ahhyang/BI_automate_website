@@ -27,14 +27,22 @@ export function mediaKindFromFile(file: File): MediaItem["kind"] | null {
   if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) return "photo";
   if (mime.startsWith("video/") || /\.(mp4|webm|mov|m4v)$/.test(name)) return "video";
   if (mime.includes("pdf") || name.endsWith(".pdf")) return "pdf";
-  if (
-    mime.includes("word") ||
-    mime.includes("text") ||
-    /\.(docx?|txt)$/.test(name)
-  ) {
-    return "pdf"; // treat docs as downloadable resources alongside PDFs
+  if (mime.includes("word") || mime.includes("text") || /\.(docx?|txt)$/.test(name)) {
+    return "pdf";
   }
   return null;
+}
+
+function localUploadRoot() {
+  // Vercel serverless FS is read-only except /tmp
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join("/tmp", "siteform-uploads");
+  }
+  return path.join(process.cwd(), ".data", "uploads");
+}
+
+export function localUploadRootPublic() {
+  return localUploadRoot();
 }
 
 export async function storeFile(file: File, folder: string) {
@@ -48,12 +56,12 @@ export async function storeFile(file: File, folder: string) {
       token: process.env.BLOB_READ_WRITE_TOKEN,
       contentType: file.type || "application/octet-stream",
     });
-    return { url: blob.url, key };
+    return { url: blob.url, key, bytes };
   }
 
-  const destDir = path.join(process.cwd(), ".data", "uploads", folder);
+  const destDir = path.join(localUploadRoot(), folder);
   await mkdir(destDir, { recursive: true });
   const filename = path.basename(key);
   await writeFile(path.join(destDir, filename), bytes);
-  return { url: `/api/files/${folder}/${filename}`, key };
+  return { url: `/api/files/${folder}/${filename}`, key, bytes };
 }
