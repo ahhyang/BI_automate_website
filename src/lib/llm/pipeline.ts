@@ -23,40 +23,10 @@ const OPENROUTER_MODEL =
   process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
-/** Anthropic SDK appends `/v1/messages` — OpenRouter host must be `/api` (not `/api/v1`). */
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api";
-
 export function isLlmConfigured(): boolean {
   return Boolean(
     process.env.OPENROUTER_API_KEY?.trim() || process.env.ANTHROPIC_API_KEY?.trim(),
   );
-}
-
-function client(): { anthropic: Anthropic; model: string; provider: "openrouter" | "anthropic" } | null {
-  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (openRouterKey) {
-    return {
-      anthropic: new Anthropic({
-        apiKey: openRouterKey,
-        baseURL: OPENROUTER_BASE_URL,
-        defaultHeaders: {
-          "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://siteform-omega.vercel.app",
-          "X-Title": process.env.NEXT_PUBLIC_APP_NAME || "Siteform",
-        },
-      }),
-      model: OPENROUTER_MODEL,
-      provider: "openrouter",
-    };
-  }
-  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (anthropicKey) {
-    return {
-      anthropic: new Anthropic({ apiKey: anthropicKey }),
-      model: ANTHROPIC_MODEL,
-      provider: "anthropic",
-    };
-  }
-  return null;
 }
 
 function llmErrorMessage(error: unknown): string {
@@ -75,55 +45,113 @@ function llmErrorMessage(error: unknown): string {
   return `AI request failed${err.status ? ` (${err.status})` : ""}: ${detail}`.slice(0, 280);
 }
 
+/** OpenRouter OpenAI-compatible chat — same path as PDF OCR (reliable billing + logs). */
+async function openRouterChat(system: string, user: string, maxTokens: number): Promise<string> {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new Error("OPENROUTER_API_KEY is not set on the server.");
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://siteform-omega.vercel.app",
+      "X-Title": process.env.NEXT_PUBLIC_APP_NAME || "Siteform",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      max_tokens: maxTokens,
+      temperature: 0.4,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string };
+    choices?: { message?: { content?: string | { type?: string; text?: string }[] } }[];
+  };
+
+  if (!res.ok) {
+    const err = new Error(body.error?.message || res.statusText || "OpenRouter error") as Error & {
+      status?: number;
+      error?: { message?: string };
+    };
+    err.status = res.status;
+    err.error = body.error;
+    throw err;
+  }
+
+  const content = body.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === "string" ? part : part.text || ""))
+      .join("\n")
+      .trim();
+  }
+  return "";
+}
+
+async function anthropicChat(system: string, user: string, maxTokens: number): Promise<string> {
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set on the server.");
+  const anthropic = new Anthropic({ apiKey: key });
+  const message = await anthropic.messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+  return message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+}
+
+async function llmChat(system: string, user: string, maxTokens: number): Promise<string> {
+  if (process.env.OPENROUTER_API_KEY?.trim()) {
+    return openRouterChat(system, user, maxTokens);
+  }
+  if (process.env.ANTHROPIC_API_KEY?.trim()) {
+    return anthropicChat(system, user, maxTokens);
+  }
+  throw new Error(
+    "AI is not configured. Add OPENROUTER_API_KEY in Vercel → Settings → Environment Variables.",
+  );
+}
+
 async function completeJson(system: string, user: string, maxTokens = 4096) {
-  const wired = client();
-  if (!wired) {
+  if (!isLlmConfigured()) {
     console.warn("[llm] No OPENROUTER_API_KEY or ANTHROPIC_API_KEY configured");
     return null;
   }
   try {
-    const message = await wired.anthropic.messages.create({
-      model: wired.model,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: user }],
-    });
-    const text = message.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
+    const text = await llmChat(system, user, maxTokens);
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.warn(`[llm] ${wired.provider} returned no JSON object`);
+      console.warn("[llm] model returned no JSON object");
       return null;
     }
     return JSON.parse(match[0]) as unknown;
   } catch (error) {
-    console.error(`[llm] completeJson via ${wired.provider}:`, llmErrorMessage(error));
+    console.error("[llm] completeJson:", llmErrorMessage(error));
     throw new Error(llmErrorMessage(error));
   }
 }
 
 async function completeText(system: string, user: string, maxTokens = 4096) {
-  const wired = client();
-  if (!wired) {
+  if (!isLlmConfigured()) {
     console.warn("[llm] No OPENROUTER_API_KEY or ANTHROPIC_API_KEY configured");
     return null;
   }
   try {
-    const message = await wired.anthropic.messages.create({
-      model: wired.model,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: user }],
-    });
-    return message.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    return await llmChat(system, user, maxTokens);
   } catch (error) {
-    console.error(`[llm] completeText via ${wired.provider}:`, llmErrorMessage(error));
+    console.error("[llm] completeText:", llmErrorMessage(error));
     throw new Error(llmErrorMessage(error));
   }
 }
@@ -459,20 +487,21 @@ export async function organizeDocumentForSite(input: {
 
   // If the text already looks like cleaned markdown, skip a redundant rewrite pass.
   const alreadyMd = /^#\s+/m.test(source) && source.length > 200;
-  const markdown =
-    alreadyMd
-      ? source
-      : (await tryCompleteText(
-          `You clean and structure messy document text into clear Markdown for a website build.
+  let markdown = source;
+  if (!alreadyMd && isLlmConfigured()) {
+    markdown = (await completeText(
+      `You clean and structure messy document text into clear Markdown for a website build.
 Output ONLY markdown. Use # / ## headings, lists, and tables when useful.
 Keep every factual detail: names, offerings, prices, hours, contacts, team, FAQs, testimonials.
 Do not invent content. Do not wrap in code fences.`,
-          `--- RAW DOCUMENT ---\n${source}\n--- END ---`,
-          8192,
-        )) || source;
+      `--- RAW DOCUMENT ---\n${source}\n--- END ---`,
+      8192,
+    )) || source;
+  }
 
-  const bundled = await tryCompleteJson(
-    `You are a senior website strategist. From the document markdown, produce ONE JSON object with smart structured fields, a site plan, and a generation prompt.
+  const bundled = isLlmConfigured()
+    ? await completeJson(
+        `You are a senior website strategist. From the document markdown, produce ONE JSON object with smart structured fields, a site plan, and a generation prompt.
 
 Return ONLY JSON:
 {
@@ -503,13 +532,14 @@ Smart mapping rules:
 - plan must be specific to THIS document (mention real name, real offerings/projects).
 - prompt must list the exact services/projects to include and forbid inventing contacts.
 - Merge any linksHint into contact/social when provided.`,
-    JSON.stringify({
-      brandColor,
-      linksHint: input.linksHint || "",
-      markdown: markdown.slice(0, 40_000),
-    }),
-    8192,
-  );
+        JSON.stringify({
+          brandColor,
+          linksHint: input.linksHint || "",
+          markdown: markdown.slice(0, 40_000),
+        }),
+        8192,
+      )
+    : null;
 
   let company: CompanyData;
   let plan: string;

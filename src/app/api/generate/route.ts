@@ -11,6 +11,7 @@ import { saveSiteContent } from "@/lib/sites";
 type Step = { key: string; label: string; status: "pending" | "running" | "done" | "failed" };
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const STEPS: { key: string; label: string }[] = [
   { key: "copy", label: "Writing homepage copy" },
