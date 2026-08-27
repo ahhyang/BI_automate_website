@@ -23,19 +23,29 @@ const OPENROUTER_MODEL =
   process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
-function client(): { anthropic: Anthropic; model: string } | null {
+/** Anthropic SDK appends `/v1/messages` — OpenRouter host must be `/api` (not `/api/v1`). */
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api";
+
+export function isLlmConfigured(): boolean {
+  return Boolean(
+    process.env.OPENROUTER_API_KEY?.trim() || process.env.ANTHROPIC_API_KEY?.trim(),
+  );
+}
+
+function client(): { anthropic: Anthropic; model: string; provider: "openrouter" | "anthropic" } | null {
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
   if (openRouterKey) {
     return {
       anthropic: new Anthropic({
         apiKey: openRouterKey,
-        baseURL: "https://openrouter.ai/api/v1",
+        baseURL: OPENROUTER_BASE_URL,
         defaultHeaders: {
           "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://siteform-omega.vercel.app",
           "X-Title": process.env.NEXT_PUBLIC_APP_NAME || "Siteform",
         },
       }),
       model: OPENROUTER_MODEL,
+      provider: "openrouter",
     };
   }
   const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -43,14 +53,34 @@ function client(): { anthropic: Anthropic; model: string } | null {
     return {
       anthropic: new Anthropic({ apiKey: anthropicKey }),
       model: ANTHROPIC_MODEL,
+      provider: "anthropic",
     };
   }
   return null;
 }
 
+function llmErrorMessage(error: unknown): string {
+  if (!error || typeof error !== "object") return String(error || "unknown error");
+  const err = error as { status?: number; message?: string; error?: { message?: string } };
+  const detail = err.error?.message || err.message || "request failed";
+  if (err.status === 401 || err.status === 403) {
+    return `AI auth failed (${err.status}). Check OPENROUTER_API_KEY on the server.`;
+  }
+  if (err.status === 402) {
+    return "OpenRouter reports insufficient credits. Top up and retry.";
+  }
+  if (err.status === 429) {
+    return "AI rate limit hit. Wait a moment and retry.";
+  }
+  return `AI request failed${err.status ? ` (${err.status})` : ""}: ${detail}`.slice(0, 280);
+}
+
 async function completeJson(system: string, user: string, maxTokens = 4096) {
   const wired = client();
-  if (!wired) return null;
+  if (!wired) {
+    console.warn("[llm] No OPENROUTER_API_KEY or ANTHROPIC_API_KEY configured");
+    return null;
+  }
   try {
     const message = await wired.anthropic.messages.create({
       model: wired.model,
@@ -63,16 +93,23 @@ async function completeJson(system: string, user: string, maxTokens = 4096) {
       .map((block) => block.text)
       .join("\n");
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
+    if (!match) {
+      console.warn(`[llm] ${wired.provider} returned no JSON object`);
+      return null;
+    }
     return JSON.parse(match[0]) as unknown;
-  } catch {
-    return null;
+  } catch (error) {
+    console.error(`[llm] completeJson via ${wired.provider}:`, llmErrorMessage(error));
+    throw new Error(llmErrorMessage(error));
   }
 }
 
 async function completeText(system: string, user: string, maxTokens = 4096) {
   const wired = client();
-  if (!wired) return null;
+  if (!wired) {
+    console.warn("[llm] No OPENROUTER_API_KEY or ANTHROPIC_API_KEY configured");
+    return null;
+  }
   try {
     const message = await wired.anthropic.messages.create({
       model: wired.model,
@@ -85,6 +122,24 @@ async function completeText(system: string, user: string, maxTokens = 4096) {
       .map((block) => block.text)
       .join("\n")
       .trim();
+  } catch (error) {
+    console.error(`[llm] completeText via ${wired.provider}:`, llmErrorMessage(error));
+    throw new Error(llmErrorMessage(error));
+  }
+}
+
+/** Soft LLM call — returns null on failure instead of throwing (for optional polish steps). */
+async function tryCompleteJson(system: string, user: string, maxTokens = 4096) {
+  try {
+    return await completeJson(system, user, maxTokens);
+  } catch {
+    return null;
+  }
+}
+
+async function tryCompleteText(system: string, user: string, maxTokens = 4096) {
+  try {
+    return await completeText(system, user, maxTokens);
   } catch {
     return null;
   }
@@ -247,7 +302,7 @@ export async function extractCompanyData(input: {
   brandColor: string;
 }): Promise<CompanyData> {
   const fallback = heuristicExtract(input.text, input.brandColor);
-  const raw = await completeJson(
+  const raw = await tryCompleteJson(
     `You convert a document into structured website fields. Be smart about document type.
 
 Return ONLY valid JSON:
@@ -407,7 +462,7 @@ export async function organizeDocumentForSite(input: {
   const markdown =
     alreadyMd
       ? source
-      : (await completeText(
+      : (await tryCompleteText(
           `You clean and structure messy document text into clear Markdown for a website build.
 Output ONLY markdown. Use # / ## headings, lists, and tables when useful.
 Keep every factual detail: names, offerings, prices, hours, contacts, team, FAQs, testimonials.
@@ -416,7 +471,7 @@ Do not invent content. Do not wrap in code fences.`,
           8192,
         )) || source;
 
-  const bundled = await completeJson(
+  const bundled = await tryCompleteJson(
     `You are a senior website strategist. From the document markdown, produce ONE JSON object with smart structured fields, a site plan, and a generation prompt.
 
 Return ONLY JSON:
@@ -506,7 +561,7 @@ Smart mapping rules:
 
   if (!plan) {
     plan =
-      (await completeText(
+      (await tryCompleteText(
         `Write a specific markdown SITE PLAN for this website. Mention the real name and real offerings/projects.
 For each section (hero, about, services, products, gallery, contact), say WHICH facts from the document go there.
 Document type: ${insights.documentTypeLabel}. No code fences.`,
@@ -528,7 +583,7 @@ Document type: ${insights.documentTypeLabel}. No code fences.`,
 
   if (!prompt) {
     prompt =
-      (await completeText(
+      (await tryCompleteText(
         `Write generation instructions for a website AI. Be specific: list offerings/projects by name.
 Map each fact to the correct section. Forbid inventing contacts. Document type: ${insights.documentTypeLabel}. Plain text only.`,
         JSON.stringify({
@@ -755,6 +810,12 @@ export async function generateSiteContent(input: {
     };
   }
 
+  if (!isLlmConfigured()) {
+    throw new Error(
+      "AI Custom needs OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) on the server. Add it in Vercel → Settings → Environment Variables, then redeploy.",
+    );
+  }
+
   const mediaNote = input.company.media.length
     ? `Media available: ${input.company.media.map((m) => m.kind).join(", ")} (${input.company.media.length} files). Include gallery.`
     : "No media files — omit gallery from sectionOrder.";
@@ -765,8 +826,10 @@ export async function generateSiteContent(input: {
   const insights = analyzeGatheredInfo(input.company);
   const contentBlueprint = buildContentBlueprint(input.company, insights);
 
-  const raw = await completeJson(
-    `You are an elite website builder. The user uploaded a real company document. Your job is to put the DOCUMENT'S DATA onto the website — not invent a generic brochure.
+  let raw: unknown;
+  try {
+    raw = await completeJson(
+      `You are an elite website builder. The user uploaded a real company document. Your job is to put the DOCUMENT'S DATA onto the website — not invent a generic brochure.
 
 Return ONLY JSON:
 {
@@ -800,29 +863,31 @@ Document-grounding rules (critical):
 - Hero can polish wording but must reflect the real tagline/positioning.
 - Tone must match company.tone. Template hint: ${input.templateId}.
 - ${mediaNote}`,
-    JSON.stringify({
-      company: companyWithoutSource,
-      documentType: insights.documentType,
-      generationPrompt: input.company.generationPrompt || "",
-      sitePlan: input.company.sitePlan || "",
-      contentBlueprint,
-      sectionPlan: insights.sectionPlan,
-      offeringChecklist: {
-        services: input.company.services.map(formatOfferingLine),
-        products: input.company.products.map(formatOfferingLine),
-      },
-      sourceDocument: documentBlock || "(no raw document text — use structured company fields only)",
-    }),
-    8192,
-  );
+      JSON.stringify({
+        company: companyWithoutSource,
+        documentType: insights.documentType,
+        generationPrompt: input.company.generationPrompt || "",
+        sitePlan: input.company.sitePlan || "",
+        contentBlueprint,
+        sectionPlan: insights.sectionPlan,
+        offeringChecklist: {
+          services: input.company.services.map(formatOfferingLine),
+          products: input.company.products.map(formatOfferingLine),
+        },
+        sourceDocument: documentBlock || "(no raw document text — use structured company fields only)",
+      }),
+      8192,
+    );
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error("AI generation failed. Check OpenRouter and try again.");
+  }
 
   if (!raw || typeof raw !== "object") {
-    return {
-      content: base,
-      layoutVariant: "split",
-      palette: input.company.palette,
-      sectionOrder,
-    };
+    throw new Error(
+      "AI returned an empty response. Check OPENROUTER_MODEL and OpenRouter credits, then retry.",
+    );
   }
 
   const data = raw as {

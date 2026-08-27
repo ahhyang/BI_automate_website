@@ -133,18 +133,20 @@ export async function POST(request: Request) {
           })
           .where(eq(generationJobs.id, job.id));
         send("done", { siteId: site.id, jobId: job.id });
-      } catch {
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Generation didn't finish. You can try Quick Template, or retry in a moment.";
         await db
           .update(generationJobs)
           .set({
             status: "failed",
-            errorMessage: "Generation didn't finish. You can try Quick Template, or retry in a moment.",
+            errorMessage: message.slice(0, 500),
             updatedAt: new Date(),
           })
           .where(eq(generationJobs.id, job.id));
-        send("error", {
-          message: "Generation didn't finish. Try Quick Template, or retry in a moment.",
-        });
+        send("error", { message });
       } finally {
         controller.close();
       }
