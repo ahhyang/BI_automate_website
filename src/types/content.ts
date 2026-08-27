@@ -70,9 +70,23 @@ export const DEFAULT_THEME: ThemeSettings = {
   cursorGlow: true,
 };
 
+export const DOCUMENT_TYPES = [
+  "resume",
+  "personal_brand",
+  "company",
+  "clinic",
+  "restaurant_menu",
+  "brochure",
+  "other",
+] as const;
+
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+
 export const companyDataSchema = z.object({
   name: z.string().min(1),
   tagline: z.string().default(""),
+  /** Inferred or LLM-detected document type — drives section mapping. */
+  documentType: z.enum(DOCUMENT_TYPES).optional(),
   industry: z.string().default(""),
   description: z.string().default(""),
   services: z.array(offeringSchema).default([]),

@@ -1,5 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  analyzeGatheredInfo,
+  buildContentBlueprint,
+  inferDocumentType,
+  smartSectionOrder,
+  type DocumentType,
+} from "@/lib/intelligence/gather-insights";
+import {
   companyDataSchema,
   sectionSchemas,
   type CompanyData,
@@ -455,6 +462,7 @@ Smart mapping rules:
 
   if (bundled && typeof bundled === "object") {
     const data = bundled as {
+      documentType?: string;
       company?: unknown;
       plan?: string;
       prompt?: string;
@@ -468,6 +476,10 @@ Smart mapping rules:
       parsed.success ? parsed.data : await extractCompanyData({ text: markdown, brandColor }),
       markdown,
     );
+    company = companyDataSchema.parse({
+      ...company,
+      documentType: resolveDocumentType(data.documentType, company),
+    });
     plan =
       (typeof data.plan === "string" && data.plan.trim().length > 40
         ? data.plan.trim()
@@ -478,36 +490,55 @@ Smart mapping rules:
         : "") || "";
   } else {
     company = await extractCompanyData({ text: markdown, brandColor });
+    company = companyDataSchema.parse({
+      ...company,
+      documentType: inferDocumentType(company),
+    });
     plan = "";
     prompt = "";
   }
 
+  const insights = analyzeGatheredInfo(company);
+  company = companyDataSchema.parse({
+    ...company,
+    documentType: company.documentType || insights.documentType,
+  });
+
   if (!plan) {
     plan =
       (await completeText(
-        `Write a specific markdown SITE PLAN for this website. Mention the real name and real offerings/projects. No code fences.`,
+        `Write a specific markdown SITE PLAN for this website. Mention the real name and real offerings/projects.
+For each section (hero, about, services, products, gallery, contact), say WHICH facts from the document go there.
+Document type: ${insights.documentTypeLabel}. No code fences.`,
         JSON.stringify({
+          documentType: insights.documentType,
           name: company.name,
           tagline: company.tagline,
           services: company.services,
           products: company.products,
           highlights: company.highlights,
+          sectionPlan: insights.sectionPlan,
         }),
         3000,
       )) ||
-      `## Site plan for ${company.name}\n1. Hero — ${company.tagline || company.name}\n2. About — professional summary\n3. Services — ${company.services.map((s) => s.title).join(", ") || "capabilities"}\n4. Projects — ${company.products.map((p) => p.title).join(", ") || "portfolio"}\n5. Contact — email/phone from document only`;
+      insights.sectionPlan
+        .map((s) => `- **${s.title}** (${s.section}): ${s.sources.join(", ") || "from brand"}`)
+        .join("\n");
   }
 
   if (!prompt) {
     prompt =
       (await completeText(
-        `Write generation instructions for a website AI. Be specific: list offerings/projects by name. Forbid inventing contacts. Plain text only.`,
+        `Write generation instructions for a website AI. Be specific: list offerings/projects by name.
+Map each fact to the correct section. Forbid inventing contacts. Document type: ${insights.documentTypeLabel}. Plain text only.`,
         JSON.stringify({
+          documentType: insights.documentType,
           name: company.name,
           tagline: company.tagline,
           services: company.services,
           products: company.products,
           contact: company.contact,
+          gaps: insights.gaps.map((g) => g.label),
           plan,
         }),
         3000,
@@ -515,12 +546,20 @@ Smart mapping rules:
       `Build a professional site for ${company.name} (${company.tagline}).\nInclude services: ${company.services.map((s) => s.title).join("; ")}.\nInclude projects: ${company.products.map((p) => p.title).join("; ")}.\nUse only contact details from the structured data. Do not invent phone/email/address.`;
   }
 
+  const contentBlueprint = buildContentBlueprint(
+    companyDataSchema.parse({ ...company, generationPrompt: prompt, sitePlan: plan }),
+    insights,
+  );
+
   const enriched = companyDataSchema.parse({
     ...company,
     sourceText: source,
     sourceMarkdown: markdown.slice(0, SOURCE_TEXT_LIMIT),
     sitePlan: plan.slice(0, 20_000),
-    generationPrompt: prompt.slice(0, 20_000),
+    generationPrompt: `${prompt.slice(0, 12_000)}\n\n--- CONTENT BLUEPRINT ---\n${contentBlueprint}`.slice(
+      0,
+      20_000,
+    ),
     brandColor,
     palette: company.palette.length ? company.palette : [brandColor],
   });
@@ -566,6 +605,7 @@ function templateCopy(company: CompanyData): SiteContentMap {
   const offerings = company.services.length ? company.services : company.products;
   const primary = offerings[0];
   const audienceHint = company.industry ? ` for ${company.industry.toLowerCase()} clients` : "";
+  const docType = company.documentType || inferDocumentType(company);
   const serviceItems = company.services.length
     ? company.services.map((s) => ({
         title: s.price ? `${s.title} — ${s.price}` : s.title,
@@ -608,11 +648,20 @@ function templateCopy(company: CompanyData): SiteContentMap {
       body: aboutBodyFromCompany(company),
     },
     services: {
-      title: company.services.length > 8 ? "Full menu of services" : "What we offer",
+      title:
+        docType === "restaurant_menu"
+          ? "Menu"
+          : docType === "resume" || docType === "personal_brand"
+            ? "Skills & services"
+            : docType === "clinic"
+              ? "Treatments & services"
+              : company.services.length > 8
+                ? "Full menu of services"
+                : "What we offer",
       items: serviceItems,
     },
     products: {
-      title: "Products",
+      title: docType === "resume" || docType === "personal_brand" ? "Projects & portfolio" : "Products",
       items: productItems,
     },
     testimonials: {
@@ -664,12 +713,24 @@ function mergeValidatedContent(
 }
 
 function defaultSectionOrder(company: CompanyData): SectionKey[] {
-  return [...SECTION_KEYS].filter((key) => {
-    if (key === "services" && company.services.length === 0) return false;
-    if (key === "products" && company.products.length === 0) return false;
-    if (key === "gallery" && company.media.length === 0) return false;
-    return true;
-  });
+  return smartSectionOrder(company, company.documentType);
+}
+
+function resolveDocumentType(raw: unknown, company: CompanyData): DocumentType {
+  const candidate = typeof raw === "string" ? raw : company.documentType;
+  const valid = [
+    "resume",
+    "personal_brand",
+    "company",
+    "clinic",
+    "restaurant_menu",
+    "brochure",
+    "other",
+  ] as const;
+  if (candidate && valid.includes(candidate as DocumentType)) {
+    return candidate as DocumentType;
+  }
+  return inferDocumentType(company);
 }
 
 export async function generateSiteContent(input: {
@@ -701,6 +762,9 @@ export async function generateSiteContent(input: {
   const { sourceText, ...companyWithoutSource } = input.company;
   const documentBlock = (sourceText || "").slice(0, 40_000);
 
+  const insights = analyzeGatheredInfo(input.company);
+  const contentBlueprint = buildContentBlueprint(input.company, insights);
+
   const raw = await completeJson(
     `You are an elite website builder. The user uploaded a real company document. Your job is to put the DOCUMENT'S DATA onto the website — not invent a generic brochure.
 
@@ -722,21 +786,27 @@ Return ONLY JSON:
   }
 }
 
+Document type: ${insights.documentTypeLabel}. Use section titles appropriate for this type (e.g. "Menu" for restaurant, "Skills" for resume).
+
 Document-grounding rules (critical):
-- Follow generationPrompt and sitePlan when provided.
+- Follow generationPrompt, sitePlan, and CONTENT BLUEPRINT — they map facts to sections.
 - Use names, offerings, prices, hours, addresses, phone, email, WhatsApp, team, FAQs, and quotes FROM THE DOCUMENT / structured company JSON.
 - services.items and products.items MUST include every offering from the structured data (titles + descriptions + prices when available). Do not drop items to "look cleaner".
 - about.body should weave description + highlights + team + FAQs from the document (use line breaks). Keep it factual.
 - contact.* must match document facts only. Put opening hours in contact.hours and mention them in contact.body.
 - testimonials: use real quotes from the document when present; otherwise one short generic line (no fake names of real people).
 - Never invent phone numbers, emails, addresses, prices, or clinic/company facts not in the source.
+- For MISSING fields in the blueprint, use generic copy — do NOT invent specific contact details.
 - Hero can polish wording but must reflect the real tagline/positioning.
 - Tone must match company.tone. Template hint: ${input.templateId}.
 - ${mediaNote}`,
     JSON.stringify({
       company: companyWithoutSource,
+      documentType: insights.documentType,
       generationPrompt: input.company.generationPrompt || "",
       sitePlan: input.company.sitePlan || "",
+      contentBlueprint,
+      sectionPlan: insights.sectionPlan,
       offeringChecklist: {
         services: input.company.services.map(formatOfferingLine),
         products: input.company.products.map(formatOfferingLine),

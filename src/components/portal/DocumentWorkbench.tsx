@@ -1,8 +1,102 @@
 "use client";
 
+import { useMemo } from "react";
 import type { CompanyData } from "@/types/content";
+import type { GatherInsights } from "@/lib/intelligence/gather-insights";
+import { analyzeGatheredInfo } from "@/lib/intelligence/gather-insights";
 import { Button } from "@/components/ui/Button";
 import { Field, inputClass } from "@/components/ui/Field";
+
+function ReadinessRing({ score }: { score: number }) {
+  const color =
+    score >= 75 ? "text-emerald-700" : score >= 50 ? "text-amber-700" : "text-rose-700";
+  return (
+    <div className={`flex flex-col items-center ${color}`}>
+      <span className="font-display text-4xl tabular-nums">{score}%</span>
+      <span className="text-xs uppercase tracking-widest">ready</span>
+    </div>
+  );
+}
+
+function GatherInsightsPanel({ insights }: { insights: GatherInsights }) {
+  return (
+    <section className="rounded-3xl border border-accent/30 bg-accent/5 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs uppercase tracking-[0.18em] text-accent">What we understood</p>
+          <h3 className="mt-1 font-display text-2xl">{insights.documentTypeLabel}</h3>
+          <p className="mt-2 text-sm text-ink-soft">{insights.summary}</p>
+        </div>
+        <ReadinessRing score={insights.readinessScore} />
+      </div>
+
+      {insights.found.length ? (
+        <div className="mt-5">
+          <p className="text-xs font-semibold uppercase tracking-widest text-ink-soft">Found & mapped</p>
+          <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+            {insights.found.map((fact) => (
+              <li
+                key={`${fact.label}-${fact.section}`}
+                className="rounded-2xl border border-line/80 bg-white px-3 py-2 text-sm"
+              >
+                <span className="font-medium">{fact.label}</span>
+                <span className="mx-1 text-ink-soft">→</span>
+                <span className="text-xs uppercase tracking-wide text-accent">{fact.section}</span>
+                <p className="mt-0.5 truncate text-ink-soft">{fact.value}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {insights.gaps.length ? (
+        <div className="mt-5">
+          <p className="text-xs font-semibold uppercase tracking-widest text-ink-soft">Still missing</p>
+          <ul className="mt-2 space-y-2">
+            {insights.gaps.map((gap) => (
+              <li
+                key={gap.field}
+                className={`rounded-2xl border px-3 py-2 text-sm ${
+                  gap.severity === "critical"
+                    ? "border-amber-300 bg-amber-50"
+                    : "border-line bg-white"
+                }`}
+              >
+                <span className="font-medium">{gap.label}</span>
+                <span className="text-ink-soft"> — for {gap.section}</span>
+                <p className="mt-0.5 text-ink-soft">{gap.why}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="mt-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-ink-soft">How your site will be built</p>
+        <ol className="mt-2 space-y-1.5 text-sm">
+          {insights.sectionPlan.map((plan, i) => (
+            <li key={plan.section} className="flex items-start gap-2">
+              <span className="mt-0.5 shrink-0 text-ink-soft">{i + 1}.</span>
+              <span>
+                <span className="font-medium">{plan.title}</span>
+                <span className={plan.ready ? " text-emerald-700" : " text-amber-700"}>
+                  {plan.ready ? " ✓" : " — needs data"}
+                </span>
+                {plan.sources.length ? (
+                  <span className="text-ink-soft"> ({plan.sources.join(", ")})</span>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <p className="mt-4 rounded-2xl border border-line bg-white px-3 py-2 text-sm text-ink-soft">
+        {insights.tip}
+      </p>
+    </section>
+  );
+}
 
 export function DocumentWorkbench({
   company,
@@ -33,16 +127,20 @@ export function DocumentWorkbench({
   onCancel: () => void;
   busy?: boolean;
 }) {
+  const insights = useMemo(() => analyzeGatheredInfo(company), [company]);
+
   return (
     <div className="mt-8 space-y-5">
       <div>
         <p className="text-xs uppercase tracking-[0.18em] text-accent">Document → plan → form</p>
         <h2 className="mt-2 font-display text-4xl">Review before we build</h2>
         <p className="mt-2 max-w-2xl text-sm text-ink-soft">
-          We extracted your document to Markdown, organized a site plan, and drafted the generation
-          prompt. Edit anything, then create the site from this data.
+          We analyzed your document, mapped facts to site sections, and drafted the generation plan.
+          Fix anything below, then create the site.
         </p>
       </div>
+
+      <GatherInsightsPanel insights={insights} />
 
       <section className="rounded-3xl border border-line bg-white p-5">
         <h3 className="font-display text-2xl">1. Extracted Markdown</h3>

@@ -4,7 +4,8 @@ import { ensureGuestSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { sites, uploads } from "@/lib/db/schema";
 import { organizeDocumentForSite } from "@/lib/llm/pipeline";
-import { companyDataSchema, linksInputSchema } from "@/types/content";
+import { analyzeGatheredInfo } from "@/lib/intelligence/gather-insights";
+import { companyDataSchema, linksInputSchema, mediaItemSchema } from "@/types/content";
 import { uniqueSubdomain } from "@/lib/sites";
 import { slugify } from "@/lib/slug";
 import { MIN_USEFUL_CHARS } from "@/lib/parsing/extract-text";
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
       text?: string;
       brandColor?: string;
       links?: unknown;
+      media?: unknown[];
     };
 
     if (!body.siteId) {
@@ -83,8 +85,16 @@ export async function POST(request: Request) {
     });
 
     let company = organized.company;
+    const uploadedMedia = Array.isArray(body.media)
+      ? body.media
+          .map((m) => mediaItemSchema.safeParse(m))
+          .filter((r) => r.success)
+          .map((r) => r.data)
+      : [];
+
     company = companyDataSchema.parse({
       ...company,
+      media: uploadedMedia.length ? uploadedMedia : company.media,
       contact: {
         ...company.contact,
         email: links.email || company.contact.email,
@@ -105,6 +115,8 @@ export async function POST(request: Request) {
       },
     });
 
+    const insights = analyzeGatheredInfo(company);
+
     const subdomain = await uniqueSubdomain(slugify(company.name) || site.subdomain);
     await db
       .update(sites)
@@ -124,6 +136,7 @@ export async function POST(request: Request) {
       plan: organized.plan,
       prompt: organized.prompt,
       company,
+      insights,
     });
   } catch (error) {
     console.error("[document/prepare]", error);

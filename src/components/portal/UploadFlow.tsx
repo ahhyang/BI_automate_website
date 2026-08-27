@@ -58,7 +58,7 @@ function progressPercent(
 
 function statusHeadline(progress: Progress, genSteps: { key: string; label: string; status: string }[]) {
   if (progress === "reading") return "Uploading your files and links…";
-  if (progress === "extracting") return "Extracting Markdown, planning the site, filling the form…";
+  if (progress === "extracting") return "Understanding your document and planning the site…";
   if (progress === "review") return "Review Markdown, plan, prompt, and data — then create";
   if (progress === "generating") {
     const running = genSteps.find((s) => s.status === "running");
@@ -393,7 +393,7 @@ export function UploadFlow() {
       }
 
       setProgress("extracting");
-      setStatusDetail("Extracting Markdown → organizing plan → filling the data form…");
+      setStatusDetail("Reading your document → detecting type → mapping facts to site sections…");
 
       const prepareBody = questions
         ? {
@@ -410,12 +410,14 @@ export function UploadFlow() {
               .filter(Boolean)
               .join("\n"),
             links: uploadJson.links || links,
+            media: uploadJson.media,
           }
         : {
             siteId: uploadJson.siteId,
             text: docText,
             brandColor: uploadJson.brandColor,
             links: uploadJson.links || links,
+            media: uploadJson.media,
           };
 
       const prepareRes = await fetch("/api/document/prepare", {
